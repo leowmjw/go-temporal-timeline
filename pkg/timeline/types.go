@@ -45,6 +45,18 @@ type NumericInterval struct {
 // NumericTimeline is a collection of numeric intervals
 type NumericTimeline []NumericInterval
 
+// NumericValue represents a numeric event for financial calculations
+type NumericValue struct {
+	Timestamp time.Time `json:"timestamp"`
+	Value     float64   `json:"value"`
+	Volume    float64   `json:"volume,omitempty"` // For volume-weighted calculations
+	Symbol    string    `json:"symbol,omitempty"`
+	Price     float64   `json:"price,omitempty"`  // For OHLC data
+}
+
+// PriceTimeline is a collection of numeric values for financial calculations
+type PriceTimeline []NumericValue
+
 // TimelineEvent is an interface for all event types
 type TimelineEvent interface {
 	GetType() string

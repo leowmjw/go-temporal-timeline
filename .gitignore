@@ -34,3 +34,6 @@ go.work.sum
 # Ignore Direnv
 .envrc*
 
+# Ignore bin dir or direct binary
+bin
+go-temporal-timeline

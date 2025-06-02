@@ -1,7 +1,6 @@
 package timeline
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 )
