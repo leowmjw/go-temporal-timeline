@@ -7,7 +7,7 @@ import (
 
 func TestEventClassifier_ClassifyEvent(t *testing.T) {
 	classifier := NewEventClassifier()
-	
+
 	tests := []struct {
 		name          string
 		rawJSON       string
@@ -116,32 +116,32 @@ func TestEventClassifier_ClassifyEvent(t *testing.T) {
 			expectedType: "play",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			event, err := classifier.ClassifyEvent([]byte(tt.rawJSON))
-			
+
 			if tt.expectedError {
 				if err == nil {
 					t.Errorf("expected error but got none")
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 				return
 			}
-			
+
 			if event.GetType() != tt.expectedType {
 				t.Errorf("expected type %s, got %s", tt.expectedType, event.GetType())
 			}
-			
+
 			// Verify timestamp is parsed
 			if event.GetTimestamp().IsZero() {
 				t.Errorf("expected non-zero timestamp")
 			}
-			
+
 			// Verify attributes are populated
 			attrs := event.GetAttributes()
 			if len(attrs) == 0 {
@@ -153,7 +153,7 @@ func TestEventClassifier_ClassifyEvent(t *testing.T) {
 
 func TestPlayEvent_Specific(t *testing.T) {
 	classifier := NewEventClassifier()
-	
+
 	rawJSON := `{
 		"eventType": "play",
 		"timestamp": "2025-01-01T12:00:00Z",
@@ -161,25 +161,25 @@ func TestPlayEvent_Specific(t *testing.T) {
 		"cdn": "CDN1",
 		"device_type": "Android"
 	}`
-	
+
 	event, err := classifier.ClassifyEvent([]byte(rawJSON))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	playEvent, ok := event.(PlayEvent)
 	if !ok {
 		t.Fatalf("expected PlayEvent, got %T", event)
 	}
-	
+
 	if playEvent.VideoID != "video123" {
 		t.Errorf("expected video_id 'video123', got '%s'", playEvent.VideoID)
 	}
-	
+
 	if playEvent.CDN != "CDN1" {
 		t.Errorf("expected cdn 'CDN1', got '%s'", playEvent.CDN)
 	}
-	
+
 	if playEvent.DeviceType != "Android" {
 		t.Errorf("expected device_type 'Android', got '%s'", playEvent.DeviceType)
 	}
@@ -187,7 +187,7 @@ func TestPlayEvent_Specific(t *testing.T) {
 
 func TestSeekEvent_Specific(t *testing.T) {
 	classifier := NewEventClassifier()
-	
+
 	rawJSON := `{
 		"eventType": "seek",
 		"timestamp": "2025-01-01T12:01:00Z",
@@ -195,25 +195,25 @@ func TestSeekEvent_Specific(t *testing.T) {
 		"seek_to_time": 25.0,
 		"video_id": "video123"
 	}`
-	
+
 	event, err := classifier.ClassifyEvent([]byte(rawJSON))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	seekEvent, ok := event.(SeekEvent)
 	if !ok {
 		t.Fatalf("expected SeekEvent, got %T", event)
 	}
-	
+
 	if seekEvent.SeekFromTime != 10.5 {
 		t.Errorf("expected seek_from_time 10.5, got %f", seekEvent.SeekFromTime)
 	}
-	
+
 	if seekEvent.SeekToTime != 25.0 {
 		t.Errorf("expected seek_to_time 25.0, got %f", seekEvent.SeekToTime)
 	}
-	
+
 	if seekEvent.VideoID != "video123" {
 		t.Errorf("expected video_id 'video123', got '%s'", seekEvent.VideoID)
 	}
@@ -221,7 +221,7 @@ func TestSeekEvent_Specific(t *testing.T) {
 
 func TestRebufferEvent_Specific(t *testing.T) {
 	classifier := NewEventClassifier()
-	
+
 	rawJSON := `{
 		"eventType": "rebuffer",
 		"timestamp": "2025-01-01T12:02:00Z",
@@ -230,29 +230,29 @@ func TestRebufferEvent_Specific(t *testing.T) {
 		"device_type": "iOS",
 		"video_id": "video123"
 	}`
-	
+
 	event, err := classifier.ClassifyEvent([]byte(rawJSON))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	rebufferEvent, ok := event.(RebufferEvent)
 	if !ok {
 		t.Fatalf("expected RebufferEvent, got %T", event)
 	}
-	
+
 	if rebufferEvent.BufferDuration != 2.5 {
 		t.Errorf("expected buffer_duration 2.5, got %f", rebufferEvent.BufferDuration)
 	}
-	
+
 	if rebufferEvent.CDN != "CDN1" {
 		t.Errorf("expected cdn 'CDN1', got '%s'", rebufferEvent.CDN)
 	}
-	
+
 	if rebufferEvent.DeviceType != "iOS" {
 		t.Errorf("expected device_type 'iOS', got '%s'", rebufferEvent.DeviceType)
 	}
-	
+
 	if rebufferEvent.VideoID != "video123" {
 		t.Errorf("expected video_id 'video123', got '%s'", rebufferEvent.VideoID)
 	}
@@ -260,7 +260,7 @@ func TestRebufferEvent_Specific(t *testing.T) {
 
 func TestEventClassifier_RegisterEventType(t *testing.T) {
 	classifier := NewEventClassifier()
-	
+
 	// Register custom event type
 	customParser := func(data map[string]interface{}) (TimelineEvent, error) {
 		return GenericEvent{
@@ -269,29 +269,29 @@ func TestEventClassifier_RegisterEventType(t *testing.T) {
 			Attributes: data,
 		}, nil
 	}
-	
+
 	classifier.RegisterEventType("custom", customParser)
-	
+
 	rawJSON := `{
 		"eventType": "custom",
 		"timestamp": "2025-01-01T12:00:00Z",
 		"custom_field": "test_value"
 	}`
-	
+
 	event, err := classifier.ClassifyEvent([]byte(rawJSON))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	if event.GetType() != "custom" {
 		t.Errorf("expected type 'custom', got '%s'", event.GetType())
 	}
-	
+
 	genericEvent, ok := event.(GenericEvent)
 	if !ok {
 		t.Fatalf("expected GenericEvent, got %T", event)
 	}
-	
+
 	if genericEvent.Attributes["custom_field"] != "test_value" {
 		t.Errorf("expected custom_field 'test_value', got '%v'", genericEvent.Attributes["custom_field"])
 	}
@@ -299,8 +299,8 @@ func TestEventClassifier_RegisterEventType(t *testing.T) {
 
 func TestTimestampParsing(t *testing.T) {
 	tests := []struct {
-		name        string
-		data        map[string]interface{}
+		name         string
+		data         map[string]interface{}
 		expectedTime time.Time
 	}{
 		{
@@ -332,11 +332,11 @@ func TestTimestampParsing(t *testing.T) {
 			// Should default to current time - we'll just check it's not zero
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := parseTimestamp(tt.data)
-			
+
 			if tt.name == "no timestamp field" {
 				// Just check it's not zero time
 				if result.IsZero() {
@@ -400,7 +400,7 @@ func TestEventTypeExtraction(t *testing.T) {
 			expected: "",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := extractEventType(tt.data)

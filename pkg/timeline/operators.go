@@ -24,7 +24,7 @@ func LatestEventToState(events EventTimeline, equals string) StateTimeline {
 
 	for i, event := range sortedEvents {
 		newState := event.Value
-		
+
 		// If this is the first event or state changed
 		if i == 0 || newState != currentState {
 			// Close previous interval if it matches the condition
@@ -35,7 +35,7 @@ func LatestEventToState(events EventTimeline, equals string) StateTimeline {
 					End:   event.Timestamp,
 				})
 			}
-			
+
 			// Start new interval
 			currentState = newState
 			stateStart = event.Timestamp
@@ -107,7 +107,7 @@ func HasExistedWithin(events EventTimeline, condition string, window time.Durati
 	})
 
 	var intervals BoolTimeline
-	
+
 	// Find all events that match the condition
 	var matchingEvents []time.Time
 	for _, event := range sortedEvents {
@@ -136,13 +136,13 @@ func HasExistedWithin(events EventTimeline, condition string, window time.Durati
 // DurationWhere calculates total duration where condition is true
 func DurationWhere(timeline BoolTimeline) time.Duration {
 	var totalDuration time.Duration
-	
+
 	for _, interval := range timeline {
 		if interval.Value {
 			totalDuration += interval.End.Sub(interval.Start)
 		}
 	}
-	
+
 	return totalDuration
 }
 
@@ -153,7 +153,7 @@ func NOT(timeline BoolTimeline) BoolTimeline {
 	}
 
 	var result BoolTimeline
-	
+
 	// Find the overall time range
 	minTime := timeline[0].Start
 	maxTime := timeline[0].End
@@ -244,10 +244,10 @@ func mergeBoolIntervals(intervals BoolTimeline) BoolTimeline {
 
 	for i := 1; i < len(intervals); i++ {
 		next := intervals[i]
-		
+
 		// If current and next overlap or are adjacent and both true
-		if current.Value == next.Value && 
-		   (current.End.After(next.Start) || current.End.Equal(next.Start)) {
+		if current.Value == next.Value &&
+			(current.End.After(next.Start) || current.End.Equal(next.Start)) {
 			// Merge intervals
 			if next.End.After(current.End) {
 				current.End = next.End
@@ -266,29 +266,29 @@ func mergeBoolIntervals(intervals BoolTimeline) BoolTimeline {
 
 func andTwoTimelines(a, b BoolTimeline) BoolTimeline {
 	var result BoolTimeline
-	
+
 	// For AND, we need to find intersections where both are true
 	for _, intervalA := range a {
 		if !intervalA.Value {
 			continue
 		}
-		
+
 		for _, intervalB := range b {
 			if !intervalB.Value {
 				continue
 			}
-			
+
 			// Find intersection
 			start := intervalA.Start
 			if intervalB.Start.After(start) {
 				start = intervalB.Start
 			}
-			
+
 			end := intervalA.End
 			if intervalB.End.Before(end) {
 				end = intervalB.End
 			}
-			
+
 			// If there's a valid intersection
 			if start.Before(end) {
 				result = append(result, BoolInterval{
@@ -299,6 +299,6 @@ func andTwoTimelines(a, b BoolTimeline) BoolTimeline {
 			}
 		}
 	}
-	
+
 	return mergeBoolIntervals(result)
 }

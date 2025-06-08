@@ -25,11 +25,11 @@ func NewMockStorageService() *MockStorageService {
 func (m *MockStorageService) AppendEvents(ctx context.Context, timelineID string, events [][]byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if m.events[timelineID] == nil {
 		m.events[timelineID] = make([][]byte, 0)
 	}
-	
+
 	m.events[timelineID] = append(m.events[timelineID], events...)
 	return nil
 }
@@ -38,17 +38,17 @@ func (m *MockStorageService) AppendEvents(ctx context.Context, timelineID string
 func (m *MockStorageService) LoadEvents(ctx context.Context, timelineID string, timeRange *TimeRange) ([][]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	events, exists := m.events[timelineID]
 	if !exists {
 		return [][]byte{}, nil
 	}
-	
+
 	// If no time range specified, return all events
 	if timeRange == nil {
 		return events, nil
 	}
-	
+
 	// Filter events by time range
 	var filteredEvents [][]byte
 	for _, eventData := range events {
@@ -56,13 +56,13 @@ func (m *MockStorageService) LoadEvents(ctx context.Context, timelineID string, 
 		if err != nil {
 			continue // Skip events with invalid timestamps
 		}
-		
+
 		if (timestamp.Equal(timeRange.Start) || timestamp.After(timeRange.Start)) &&
-		   (timestamp.Equal(timeRange.End) || timestamp.Before(timeRange.End)) {
+			(timestamp.Equal(timeRange.End) || timestamp.Before(timeRange.End)) {
 			filteredEvents = append(filteredEvents, eventData)
 		}
 	}
-	
+
 	return filteredEvents, nil
 }
 
@@ -73,7 +73,7 @@ func (m *MockStorageService) ReadEvents(ctx context.Context, timelineID string, 
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// If filters are provided, simulate filtering (just return a subset for testing)
 	if len(filters) > 0 && len(events) > 0 {
 		// Return up to the number of filters (simulating filtered results)
@@ -83,7 +83,7 @@ func (m *MockStorageService) ReadEvents(ctx context.Context, timelineID string, 
 		}
 		return events[:maxResults], nil
 	}
-	
+
 	return events, nil
 }
 
@@ -91,12 +91,12 @@ func (m *MockStorageService) ReadEvents(ctx context.Context, timelineID string, 
 func (m *MockStorageService) GetEventCount(timelineID string) int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	events, exists := m.events[timelineID]
 	if !exists {
 		return 0
 	}
-	
+
 	return len(events)
 }
 
@@ -117,7 +117,7 @@ func NewMockIndexService() *MockIndexService {
 func (m *MockIndexService) IndexEvents(ctx context.Context, events [][]byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.events = append(m.events, events...)
 	return nil
 }
@@ -126,15 +126,15 @@ func (m *MockIndexService) IndexEvents(ctx context.Context, events [][]byte) err
 func (m *MockIndexService) QueryEvents(ctx context.Context, filters map[string]interface{}, timeRange *TimeRange) ([]string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	var matchingPointers []string
-	
+
 	for i, eventData := range m.events {
 		if m.eventMatchesFilters(eventData, filters, timeRange) {
 			matchingPointers = append(matchingPointers, fmt.Sprintf("event_%d", i))
 		}
 	}
-	
+
 	return matchingPointers, nil
 }
 
@@ -144,19 +144,19 @@ func (m *MockIndexService) eventMatchesFilters(eventData []byte, filters map[str
 	if err := json.Unmarshal(eventData, &event); err != nil {
 		return false
 	}
-	
+
 	// Check time range
 	if timeRange != nil {
 		timestamp, err := extractTimestampFromEvent(eventData)
 		if err != nil {
 			return false
 		}
-		
+
 		if timestamp.Before(timeRange.Start) || timestamp.After(timeRange.End) {
 			return false
 		}
 	}
-	
+
 	// Check filters
 	for key, expectedValue := range filters {
 		actualValue, exists := event[key]
@@ -164,7 +164,7 @@ func (m *MockIndexService) eventMatchesFilters(eventData []byte, filters map[str
 			return false
 		}
 	}
-	
+
 	return true
 }
 
@@ -174,10 +174,10 @@ func extractTimestampFromEvent(eventData []byte) (time.Time, error) {
 	if err := json.Unmarshal(eventData, &event); err != nil {
 		return time.Time{}, err
 	}
-	
+
 	// Try various timestamp field names
 	fieldNames := []string{"timestamp", "ts", "time", "eventTime", "event_time"}
-	
+
 	for _, field := range fieldNames {
 		if value, exists := event[field]; exists {
 			switch v := value.(type) {
@@ -198,6 +198,6 @@ func extractTimestampFromEvent(eventData []byte) (time.Time, error) {
 			}
 		}
 	}
-	
+
 	return time.Time{}, fmt.Errorf("no valid timestamp found")
 }

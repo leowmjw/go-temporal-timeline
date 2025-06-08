@@ -19,7 +19,7 @@ func NewEventClassifier() *EventClassifier {
 	ec := &EventClassifier{
 		registry: make(map[string]EventParser),
 	}
-	
+
 	// Register default event types
 	ec.RegisterEventType("play", parsePlayEvent)
 	ec.RegisterEventType("seek", parseSeekEvent)
@@ -27,7 +27,7 @@ func NewEventClassifier() *EventClassifier {
 	ec.RegisterEventType("playerStateChange", parsePlayerStateEvent)
 	ec.RegisterEventType("cdnChange", parseCDNChangeEvent)
 	ec.RegisterEventType("userAction", parseUserActionEvent)
-	
+
 	return ec
 }
 
@@ -42,20 +42,20 @@ func (ec *EventClassifier) ClassifyEvent(rawJSON []byte) (TimelineEvent, error) 
 	if err := json.Unmarshal(rawJSON, &rawData); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON: %w", err)
 	}
-	
+
 	// Extract event type from various possible fields
 	eventType := extractEventType(rawData)
 	if eventType == "" {
 		return parseGenericEvent(rawData)
 	}
-	
+
 	// Look up parser in registry
 	parser, exists := ec.registry[eventType]
 	if !exists {
 		// Fall back to generic parsing
 		return parseGenericEvent(rawData)
 	}
-	
+
 	return parser(rawData)
 }
 
@@ -63,15 +63,15 @@ func (ec *EventClassifier) ClassifyEvent(rawJSON []byte) (TimelineEvent, error) 
 
 // PlayEvent represents a video play event
 type PlayEvent struct {
-	Timestamp    time.Time              `json:"timestamp"`
-	VideoID      string                 `json:"video_id"`
-	CDN          string                 `json:"cdn"`
-	DeviceType   string                 `json:"device_type"`
-	Attributes   map[string]interface{} `json:"attributes"`
+	Timestamp  time.Time              `json:"timestamp"`
+	VideoID    string                 `json:"video_id"`
+	CDN        string                 `json:"cdn"`
+	DeviceType string                 `json:"device_type"`
+	Attributes map[string]interface{} `json:"attributes"`
 }
 
-func (e PlayEvent) GetType() string { return "play" }
-func (e PlayEvent) GetTimestamp() time.Time { return e.Timestamp }
+func (e PlayEvent) GetType() string                       { return "play" }
+func (e PlayEvent) GetTimestamp() time.Time               { return e.Timestamp }
 func (e PlayEvent) GetAttributes() map[string]interface{} { return e.Attributes }
 
 // SeekEvent represents a video seek event
@@ -83,8 +83,8 @@ type SeekEvent struct {
 	Attributes   map[string]interface{} `json:"attributes"`
 }
 
-func (e SeekEvent) GetType() string { return "seek" }
-func (e SeekEvent) GetTimestamp() time.Time { return e.Timestamp }
+func (e SeekEvent) GetType() string                       { return "seek" }
+func (e SeekEvent) GetTimestamp() time.Time               { return e.Timestamp }
 func (e SeekEvent) GetAttributes() map[string]interface{} { return e.Attributes }
 
 // RebufferEvent represents a rebuffering event
@@ -97,8 +97,8 @@ type RebufferEvent struct {
 	Attributes     map[string]interface{} `json:"attributes"`
 }
 
-func (e RebufferEvent) GetType() string { return "rebuffer" }
-func (e RebufferEvent) GetTimestamp() time.Time { return e.Timestamp }
+func (e RebufferEvent) GetType() string                       { return "rebuffer" }
+func (e RebufferEvent) GetTimestamp() time.Time               { return e.Timestamp }
 func (e RebufferEvent) GetAttributes() map[string]interface{} { return e.Attributes }
 
 // GenericEvent represents any event that doesn't have a specific parser
@@ -108,8 +108,8 @@ type GenericEvent struct {
 	Attributes map[string]interface{} `json:"attributes"`
 }
 
-func (e GenericEvent) GetType() string { return e.EventType }
-func (e GenericEvent) GetTimestamp() time.Time { return e.Timestamp }
+func (e GenericEvent) GetType() string                       { return e.EventType }
+func (e GenericEvent) GetTimestamp() time.Time               { return e.Timestamp }
 func (e GenericEvent) GetAttributes() map[string]interface{} { return e.Attributes }
 
 // Event parser functions
@@ -117,7 +117,7 @@ func (e GenericEvent) GetAttributes() map[string]interface{} { return e.Attribut
 func extractEventType(data map[string]interface{}) string {
 	// Try various field names that might contain the event type
 	fieldNames := []string{"eventType", "event_type", "type", "action", "event", "messageType"}
-	
+
 	for _, field := range fieldNames {
 		if value, exists := data[field]; exists {
 			if str, ok := value.(string); ok {
@@ -125,14 +125,14 @@ func extractEventType(data map[string]interface{}) string {
 			}
 		}
 	}
-	
+
 	return ""
 }
 
 func parseTimestamp(data map[string]interface{}) time.Time {
 	// Try various timestamp field names
 	fieldNames := []string{"timestamp", "ts", "time", "eventTime", "event_time"}
-	
+
 	for _, field := range fieldNames {
 		if value, exists := data[field]; exists {
 			switch v := value.(type) {
@@ -153,7 +153,7 @@ func parseTimestamp(data map[string]interface{}) time.Time {
 			}
 		}
 	}
-	
+
 	// Default to current time if no timestamp found
 	return time.Now()
 }
@@ -163,7 +163,7 @@ func parsePlayEvent(data map[string]interface{}) (TimelineEvent, error) {
 		Timestamp:  parseTimestamp(data),
 		Attributes: make(map[string]interface{}),
 	}
-	
+
 	// Extract specific fields
 	if value, exists := data["video_id"]; exists {
 		if str, ok := value.(string); ok {
@@ -180,12 +180,12 @@ func parsePlayEvent(data map[string]interface{}) (TimelineEvent, error) {
 			event.DeviceType = str
 		}
 	}
-	
+
 	// Copy all fields to attributes
 	for k, v := range data {
 		event.Attributes[k] = v
 	}
-	
+
 	return event, nil
 }
 
@@ -194,7 +194,7 @@ func parseSeekEvent(data map[string]interface{}) (TimelineEvent, error) {
 		Timestamp:  parseTimestamp(data),
 		Attributes: make(map[string]interface{}),
 	}
-	
+
 	// Extract specific fields
 	if value, exists := data["seek_from_time"]; exists {
 		if num, ok := value.(float64); ok {
@@ -211,12 +211,12 @@ func parseSeekEvent(data map[string]interface{}) (TimelineEvent, error) {
 			event.VideoID = str
 		}
 	}
-	
+
 	// Copy all fields to attributes
 	for k, v := range data {
 		event.Attributes[k] = v
 	}
-	
+
 	return event, nil
 }
 
@@ -225,7 +225,7 @@ func parseRebufferEvent(data map[string]interface{}) (TimelineEvent, error) {
 		Timestamp:  parseTimestamp(data),
 		Attributes: make(map[string]interface{}),
 	}
-	
+
 	// Extract specific fields
 	if value, exists := data["buffer_duration"]; exists {
 		if num, ok := value.(float64); ok {
@@ -247,12 +247,12 @@ func parseRebufferEvent(data map[string]interface{}) (TimelineEvent, error) {
 			event.VideoID = str
 		}
 	}
-	
+
 	// Copy all fields to attributes
 	for k, v := range data {
 		event.Attributes[k] = v
 	}
-	
+
 	return event, nil
 }
 
@@ -263,7 +263,7 @@ func parsePlayerStateEvent(data map[string]interface{}) (TimelineEvent, error) {
 		Type:      "playerStateChange",
 		Attrs:     make(map[string]interface{}),
 	}
-	
+
 	// Extract the state value
 	if value, exists := data["state"]; exists {
 		if str, ok := value.(string); ok {
@@ -274,12 +274,12 @@ func parsePlayerStateEvent(data map[string]interface{}) (TimelineEvent, error) {
 			event.Value = str
 		}
 	}
-	
+
 	// Copy all fields to attributes
 	for k, v := range data {
 		event.Attrs[k] = v
 	}
-	
+
 	return event, nil
 }
 
@@ -289,7 +289,7 @@ func parseCDNChangeEvent(data map[string]interface{}) (TimelineEvent, error) {
 		Type:      "cdnChange",
 		Attrs:     make(map[string]interface{}),
 	}
-	
+
 	// Extract the CDN value
 	if value, exists := data["cdn"]; exists {
 		if str, ok := value.(string); ok {
@@ -300,12 +300,12 @@ func parseCDNChangeEvent(data map[string]interface{}) (TimelineEvent, error) {
 			event.Value = str
 		}
 	}
-	
+
 	// Copy all fields to attributes
 	for k, v := range data {
 		event.Attrs[k] = v
 	}
-	
+
 	return event, nil
 }
 
@@ -315,7 +315,7 @@ func parseUserActionEvent(data map[string]interface{}) (TimelineEvent, error) {
 		Type:      "userAction",
 		Attrs:     make(map[string]interface{}),
 	}
-	
+
 	// Extract the action value
 	if value, exists := data["action"]; exists {
 		if str, ok := value.(string); ok {
@@ -326,12 +326,12 @@ func parseUserActionEvent(data map[string]interface{}) (TimelineEvent, error) {
 			event.Value = str
 		}
 	}
-	
+
 	// Copy all fields to attributes
 	for k, v := range data {
 		event.Attrs[k] = v
 	}
-	
+
 	return event, nil
 }
 
@@ -341,16 +341,16 @@ func parseGenericEvent(data map[string]interface{}) (TimelineEvent, error) {
 		EventType:  extractEventType(data),
 		Attributes: make(map[string]interface{}),
 	}
-	
+
 	// If no event type found, use "unknown"
 	if event.EventType == "" {
 		event.EventType = "unknown"
 	}
-	
+
 	// Copy all fields to attributes
 	for k, v := range data {
 		event.Attributes[k] = v
 	}
-	
+
 	return event, nil
 }

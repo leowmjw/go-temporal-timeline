@@ -6,9 +6,9 @@ import (
 
 // Event represents a single event in time
 type Event struct {
-	Timestamp time.Time          `json:"timestamp"`
-	Type      string             `json:"type"`
-	Value     string             `json:"value"`
+	Timestamp time.Time              `json:"timestamp"`
+	Type      string                 `json:"type"`
+	Value     string                 `json:"value"`
 	Attrs     map[string]interface{} `json:"attrs,omitempty"`
 }
 
@@ -51,7 +51,7 @@ type NumericValue struct {
 	Value     float64   `json:"value"`
 	Volume    float64   `json:"volume,omitempty"` // For volume-weighted calculations
 	Symbol    string    `json:"symbol,omitempty"`
-	Price     float64   `json:"price,omitempty"`  // For OHLC data
+	Price     float64   `json:"price,omitempty"` // For OHLC data
 }
 
 // PriceTimeline is a collection of numeric values for financial calculations

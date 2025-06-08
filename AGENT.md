@@ -132,6 +132,37 @@ The Timeline Analytics Platform is a Go-based (v1.24.3+) distributed service for
 * **Load/stress:** Simulate large backfills (many events, partitions), test scaling by chunking and child workflows
 * **Coverage goal:** 80%+ project-wide; coverage tracked in CI/CD
 
+#### 7.1. HTTP Handler Testing with Temporal Mocks (Go `pkg/http`)
+
+Key patterns and learnings for testing HTTP handlers that interact with Temporal:
+
+*   **Path Parameter Handling**:
+    *   Utilize `http.NewServeMux` in tests to accurately simulate request routing and enable handlers to extract path parameters via `r.PathValue("id")`.
+    *   Example: `mux := http.NewServeMux(); mux.HandleFunc("POST /timelines/{id}/your_endpoint", server.handleYourEndpoint); mux.ServeHTTP(rr, req)`
+
+*   **Temporal Client Mocking (`testify/mock`)**:
+    *   Ensure every Temporal client method invoked by a handler (e.g., `SignalWithStartWorkflow`, `ExecuteWorkflow`) has a corresponding mock expectation defined (e.g., `mockClient.On("MethodName", ...).Return(...)`). Unmet calls typically result in panics.
+    *   Use `mockClient.AssertExpectations(t)` to verify all mocks were called as expected.
+
+*   **Mock Argument Matching Strategies**:
+    *   **Context**: Use `mock.Anything` for `context.Context` arguments.
+    *   **Dynamic Structs (e.g., `client.StartWorkflowOptions`)**: Use `mock.AnythingOfType("StartWorkflowOptions")`. Note the use of the *unqualified* type name. The mock framework resolves this to the correct internal SDK type. Using qualified names like `"client.StartWorkflowOptions"` can lead to mismatches.
+    *   **Workflow Function Signatures**: Use `mock.AnythingOfType` with the precise function signature string, substituting `workflow.Context` with `internal.Context`. Examples:
+        *   `IngestionWorkflow`: `"func(internal.Context, string) error"` (assuming `string` is the second arg for the specific workflow, adjust as needed)
+        *   `QueryWorkflow`: `"func(internal.Context, temporal.QueryRequest) (*temporal.QueryResult, error)"`
+        *   `ReplayWorkflow`: `"func(internal.Context, temporal.ReplayRequest) (*temporal.QueryResult, error)"`
+    *   **Specific Request Objects**: For arguments like `temporal.QueryRequest` or `temporal.ReplayRequest` passed to workflows, create an `expectedRequest` object in the test. Ensure any fields populated by the handler *before* the Temporal call (e.g., `TimelineID` derived from path parameters) are set in this `expectedRequest`.
+
+*   **Testing Error Paths**:
+    *   Configure mocks to return errors (e.g., `.Return(nil, errors.New("mock temporal error"))`).
+    *   Assert that the HTTP handler correctly translates these errors into appropriate HTTP status codes (e.g., `http.StatusInternalServerError`).
+
+*   **Tests Fixed/Refined with these patterns**:
+    *   `TestServer_handleIngestEvents_ValidJSON`
+    *   `TestServer_handleQuery`
+    *   `TestServer_handleReplayQuery`
+    (All located in `pkg/http/server_test.go`)
+
 ---
 
 ### 8. MermaidJS Architecture Diagrams (Valid, Copy-Paste Ready)
@@ -299,7 +330,7 @@ flowchart TD
 #### **Build Status:**
 - ✅ `go build` - successful compilation
 - ✅ `go test ./pkg/timeline/ ./pkg/temporal/` - all tests pass
-- ⚠️ `go test ./pkg/http/` - has mock setup issues (not blocking, outside fintech scope)
+- ✅ HTTP handler tests in `pkg/http/` are now passing after resolving Temporal client mock setup issues. See section 7.1 for detailed patterns.
 
 ### **Commands for Testing & Development:**
 ```bash

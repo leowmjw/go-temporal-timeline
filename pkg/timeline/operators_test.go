@@ -46,7 +46,7 @@ func TestLatestEventToState(t *testing.T) {
 				{Timestamp: time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC), Type: "state", Value: "play"},
 				{Timestamp: time.Date(2025, 1, 1, 12, 1, 0, 0, time.UTC), Type: "state", Value: "pause"},
 			},
-			equals: "buffer",
+			equals:   "buffer",
 			expected: StateTimeline{},
 		},
 	}

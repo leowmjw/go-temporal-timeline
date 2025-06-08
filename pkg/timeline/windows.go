@@ -17,12 +17,12 @@ const (
 
 // Window represents a time window for aggregations
 type Window struct {
-	Type     WindowType    `json:"type"`
-	Size     time.Duration `json:"size"`
-	Slide    time.Duration `json:"slide,omitempty"`    // For sliding windows
-	Timeout  time.Duration `json:"timeout,omitempty"`  // For session windows
-	Start    time.Time     `json:"start"`
-	End      time.Time     `json:"end"`
+	Type    WindowType    `json:"type"`
+	Size    time.Duration `json:"size"`
+	Slide   time.Duration `json:"slide,omitempty"`   // For sliding windows
+	Timeout time.Duration `json:"timeout,omitempty"` // For session windows
+	Start   time.Time     `json:"start"`
+	End     time.Time     `json:"end"`
 }
 
 // WindowedValue represents a value within a specific window
@@ -54,14 +54,14 @@ type OHLCTimeline []OHLC
 // CreateSlidingWindows creates sliding windows over a time range
 func CreateSlidingWindows(start, end time.Time, windowSize, slideSize time.Duration) []Window {
 	var windows []Window
-	
+
 	current := start
 	for current.Before(end) {
 		windowEnd := current.Add(windowSize)
 		if windowEnd.After(end) {
 			windowEnd = end
 		}
-		
+
 		windows = append(windows, Window{
 			Type:  SlidingWindow,
 			Size:  windowSize,
@@ -69,34 +69,34 @@ func CreateSlidingWindows(start, end time.Time, windowSize, slideSize time.Durat
 			Start: current,
 			End:   windowEnd,
 		})
-		
+
 		current = current.Add(slideSize)
 	}
-	
+
 	return windows
 }
 
 // CreateTumblingWindows creates non-overlapping tumbling windows
 func CreateTumblingWindows(start, end time.Time, windowSize time.Duration) []Window {
 	var windows []Window
-	
+
 	current := start
 	for current.Before(end) {
 		windowEnd := current.Add(windowSize)
 		if windowEnd.After(end) {
 			windowEnd = end
 		}
-		
+
 		windows = append(windows, Window{
 			Type:  TumblingWindow,
 			Size:  windowSize,
 			Start: current,
 			End:   windowEnd,
 		})
-		
+
 		current = windowEnd
 	}
-	
+
 	return windows
 }
 
@@ -105,21 +105,21 @@ func CreateSessionWindows(events []time.Time, sessionTimeout time.Duration) []Wi
 	if len(events) == 0 {
 		return []Window{}
 	}
-	
+
 	// Sort events by timestamp
 	sortedEvents := make([]time.Time, len(events))
 	copy(sortedEvents, events)
 	sort.Slice(sortedEvents, func(i, j int) bool {
 		return sortedEvents[i].Before(sortedEvents[j])
 	})
-	
+
 	var windows []Window
 	sessionStart := sortedEvents[0]
 	lastEvent := sortedEvents[0]
-	
+
 	for i := 1; i < len(sortedEvents); i++ {
 		current := sortedEvents[i]
-		
+
 		// If gap is larger than timeout, end current session and start new one
 		if current.Sub(lastEvent) > sessionTimeout {
 			windows = append(windows, Window{
@@ -132,7 +132,7 @@ func CreateSessionWindows(events []time.Time, sessionTimeout time.Duration) []Wi
 		}
 		lastEvent = current
 	}
-	
+
 	// Add final session
 	windows = append(windows, Window{
 		Type:    SessionWindow,
@@ -140,35 +140,35 @@ func CreateSessionWindows(events []time.Time, sessionTimeout time.Duration) []Wi
 		Start:   sessionStart,
 		End:     lastEvent.Add(sessionTimeout),
 	})
-	
+
 	return windows
 }
 
 // ApplyWindowToPriceTimeline applies a window to price timeline data
 func ApplyWindowToPriceTimeline(timeline PriceTimeline, window Window) PriceTimeline {
 	var windowed PriceTimeline
-	
+
 	for _, value := range timeline {
 		if (value.Timestamp.Equal(window.Start) || value.Timestamp.After(window.Start)) &&
-		   value.Timestamp.Before(window.End) {
+			value.Timestamp.Before(window.End) {
 			windowed = append(windowed, value)
 		}
 	}
-	
+
 	return windowed
 }
 
 // ApplyWindowToOHLCTimeline applies a window to OHLC timeline data
 func ApplyWindowToOHLCTimeline(timeline OHLCTimeline, window Window) OHLCTimeline {
 	var windowed OHLCTimeline
-	
+
 	for _, ohlc := range timeline {
 		if (ohlc.Timestamp.Equal(window.Start) || ohlc.Timestamp.After(window.Start)) &&
-		   ohlc.Timestamp.Before(window.End) {
+			ohlc.Timestamp.Before(window.End) {
 			windowed = append(windowed, ohlc)
 		}
 	}
-	
+
 	return windowed
 }
 
@@ -192,10 +192,10 @@ func GetTimestampsFromOHLCTimeline(timeline OHLCTimeline) []time.Time {
 
 // WindowSpec represents a window specification for queries
 type WindowSpec struct {
-	Type       WindowType    `json:"type"`
-	Size       string        `json:"size"`        // Duration string like "5m", "1h"
-	Slide      string        `json:"slide,omitempty"`
-	Timeout    string        `json:"timeout,omitempty"`
+	Type    WindowType `json:"type"`
+	Size    string     `json:"size"` // Duration string like "5m", "1h"
+	Slide   string     `json:"slide,omitempty"`
+	Timeout string     `json:"timeout,omitempty"`
 }
 
 // ParseWindowSpec parses a window specification from string durations
@@ -204,12 +204,12 @@ func ParseWindowSpec(spec WindowSpec) (Window, error) {
 	if err != nil {
 		return Window{}, fmt.Errorf("invalid window size: %w", err)
 	}
-	
+
 	window := Window{
 		Type: spec.Type,
 		Size: size,
 	}
-	
+
 	if spec.Slide != "" {
 		slide, err := time.ParseDuration(spec.Slide)
 		if err != nil {
@@ -217,7 +217,7 @@ func ParseWindowSpec(spec WindowSpec) (Window, error) {
 		}
 		window.Slide = slide
 	}
-	
+
 	if spec.Timeout != "" {
 		timeout, err := time.ParseDuration(spec.Timeout)
 		if err != nil {
@@ -225,6 +225,6 @@ func ParseWindowSpec(spec WindowSpec) (Window, error) {
 		}
 		window.Timeout = timeout
 	}
-	
+
 	return window, nil
 }

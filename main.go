@@ -11,7 +11,7 @@ func main() {
 	cmd := exec.Command("go", "run", "./cmd/server")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Run(); err != nil {
 		log.Fatalf("Failed to run server: %v", err)
 	}
