@@ -383,3 +383,67 @@ go build
 * **IMPORTANT:** Respect the NumericTimeline vs PriceTimeline type separation detailed above
 * Document all changes and update this file so future agents can continue seamlessly
 
+---
+
+### 9. HCL CLI Tool Implementation
+
+#### 9.1. Overview and Purpose
+
+The HCL CLI tool extends the Timeline Analytics Platform with a standalone command-line interface that enables users to execute timeline queries using HashiCorp Configuration Language (HCL) files directly from the terminal. This leverages the existing HCL parsing capabilities while providing a Terraform-like experience for analytics queries.
+
+#### 9.2. Key Features
+
+* **Single File and Directory Support**: The CLI tool can process either a single HCL file or an entire directory of HCL files, following Terraform's approach to configuration.
+* **File Merging**: When a directory is specified, all `.hcl` and `.tf` files are merged into a single configuration before execution.
+* **Multiple Output Formats**: Results can be displayed as human-readable text or JSON.
+* **Operation Modes**: Supports both `query` and `replay` modes for different types of timeline operations.
+* **Customizable Connection**: Allows configuration of Temporal server address and namespace via command-line flags.
+
+#### 9.3. Architecture
+
+* **Command Structure**: The CLI tool (`cmd/timeline/main.go`) handles flag parsing, HCL file/directory processing, and Temporal workflow execution.
+* **HCL Processing Utilities**: The `pkg/hcl/merge.go` utilities handle merging multiple HCL files and parsing them into query or replay request structures.
+* **Workflow Execution**: The tool directly executes Temporal workflows for queries or replays, using the same workflows as the HTTP API.
+
+#### 9.4. HCL Format
+
+The HCL query format follows a declarative structure:
+
+```hcl
+timeline_id = "user-123"
+
+time_range {
+  start = "2025-01-01T00:00:00Z"
+  end   = "2025-06-01T23:59:59Z"
+}
+
+operation "count_events" {
+  id     = "event_counter"
+  type   = "count"
+  source = "events"
+}
+```
+
+More complex queries can include nested operations, filters, and conditions.
+
+#### 9.5. Testing Approach
+
+* **HCL-JSON Equivalence**: Tests verify that parsing HCL produces identical structures as parsing equivalent JSON.
+* **Multiple File Merging**: Tests confirm that merging multiple HCL files from directories works correctly.
+* **Fixture-Based Testing**: Uses test fixtures for HCL and JSON to compare parsing results across formats.
+
+#### 9.6. Implementation Notes
+
+* The CLI follows the same workflow execution patterns as the HTTP API but operates directly from the command line.
+* Uses the Temporal Go SDK to connect to the workflow engine.
+* The merging logic for directory-based HCL files concatenates content with appropriate handling for nested blocks.
+* Test utilities ensure consistent comparison between HCL and JSON-derived query structures.
+
+#### 9.7. Future Enhancement Opportunities
+
+* Add interactive mode for building and refining queries.
+* Support saving query results to files or databases.
+* Implement query templates and variable substitution.
+* Add validation rules and schema checking for HCL files.
+* Create a query history feature to recall and reuse previous queries.
+

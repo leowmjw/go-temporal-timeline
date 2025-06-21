@@ -1,0 +1,37 @@
+{
+  "timeline_id": "user-123",
+  "filters": {
+    "user_id": "123",
+    "status": "active"
+  },
+  "time_range": {
+    "start": "2025-01-01T00:00:00Z",
+    "end": "2025-06-01T23:59:59Z"
+  },
+  "operations": [
+    {
+      "id": "event_counter",
+      "op": "count",
+      "source": "events"
+    },
+    {
+      "id": "avg_response_time",
+      "op": "average",
+      "window": "5m",
+      "of": {
+        "id": "response_times",
+        "op": "extract",
+        "source": "response_time"
+      }
+    },
+    {
+      "id": "max_cpu",
+      "op": "max",
+      "of": {
+        "id": "cpu_values",
+        "op": "extract",
+        "source": "resource.cpu"
+      }
+    }
+  ]
+}

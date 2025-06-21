@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"go.temporal.io/sdk/client"
 
+	"github.com/leowmjw/go-temporal-timeline/pkg/hcl"
 	"github.com/leowmjw/go-temporal-timeline/pkg/temporal"
 )
 
@@ -138,9 +140,44 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Detect content type (JSON or HCL)
+	contentType, err := hcl.DetectContentType(r)
+	if err != nil {
+		s.logger.Error("Failed to detect content type", "error", err)
+		s.respondError(w, http.StatusBadRequest, "could not process request body")
+		return
+	}
+
 	var request temporal.QueryRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		s.respondError(w, http.StatusBadRequest, "invalid JSON body")
+
+	// Parse request body based on detected content type
+	switch contentType {
+	case hcl.ContentTypeHCL:
+		// Read body for HCL parsing
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			s.respondError(w, http.StatusBadRequest, "failed to read request body")
+			return
+		}
+
+		// Parse HCL content
+		parsedRequest, err := hcl.ParseHCLQuery(string(body))
+		if err != nil {
+			s.logger.Error("Failed to parse HCL query", "error", err)
+			s.respondError(w, http.StatusBadRequest, "invalid HCL configuration: "+err.Error())
+			return
+		}
+		request = *parsedRequest
+
+	case hcl.ContentTypeJSON:
+		// Decode as JSON (original method)
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			s.respondError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+
+	default:
+		s.respondError(w, http.StatusBadRequest, "unsupported content type")
 		return
 	}
 
@@ -189,9 +226,44 @@ func (s *Server) handleReplayQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Detect content type (JSON or HCL)
+	contentType, err := hcl.DetectContentType(r)
+	if err != nil {
+		s.logger.Error("Failed to detect content type", "error", err)
+		s.respondError(w, http.StatusBadRequest, "could not process request body")
+		return
+	}
+
 	var request temporal.ReplayRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		s.respondError(w, http.StatusBadRequest, "invalid JSON body")
+
+	// Parse request body based on detected content type
+	switch contentType {
+	case hcl.ContentTypeHCL:
+		// Read body for HCL parsing
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			s.respondError(w, http.StatusBadRequest, "failed to read request body")
+			return
+		}
+
+		// Parse HCL content
+		parsedRequest, err := hcl.ParseHCLReplayRequest(string(body))
+		if err != nil {
+			s.logger.Error("Failed to parse HCL replay query", "error", err)
+			s.respondError(w, http.StatusBadRequest, "invalid HCL configuration: "+err.Error())
+			return
+		}
+		request = *parsedRequest
+
+	case hcl.ContentTypeJSON:
+		// Decode as JSON (original method)
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			s.respondError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+
+	default:
+		s.respondError(w, http.StatusBadRequest, "unsupported content type")
 		return
 	}
 
