@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"github.com/davecgh/go-spew/spew"
 	"log/slog"
 	"os"
 	"testing"
@@ -96,6 +97,8 @@ func TestActivitiesImpl_ProcessEventsActivity(t *testing.T) {
 	if result == nil {
 		t.Fatal("Expected non-nil result")
 	}
+
+	spew.Dump(result)
 
 	// Verify metadata
 	if result.Metadata["eventCount"] != 3 {

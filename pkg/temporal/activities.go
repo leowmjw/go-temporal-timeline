@@ -444,6 +444,9 @@ func filterEventsByType(events timeline.EventTimeline, eventType string) timelin
 	for _, event := range events {
 		if event.Type == eventType {
 			filtered = append(filtered, event)
+		} else {
+			// DEBUG
+			fmt.Printf("Skipping event %s of type %s\n", event, event.Type)
 		}
 	}
 	return filtered

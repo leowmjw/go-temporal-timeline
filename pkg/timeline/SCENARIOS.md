@@ -38,7 +38,8 @@ Flow:
 
 ## Deep Analysis #2
 
-SCENARIO: Instead, teams must be able to analyze fine-grained “micro” cohorts—such as Chrome users searching for shoes in California in experiment group C while logged in. 
+SCENARIO: Instead, teams must be able to analyze fine-grained “micro” cohorts—such as Chrome users searching for shoes in 
+California in experiment group C while logged in. 
 
 Cohort Features:
 
