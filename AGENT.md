@@ -348,6 +348,49 @@ flowchart TD
 
 ## Implementation Status & Recent Changes
 
+### ✅ **COMPLETED: Plan 1 - Micro-Workflow Architecture with Real-Time Streaming (June 2025)**
+
+**Major accomplishment:** Successfully implemented the Micro-Workflow Architecture for Timeline Operators with comprehensive real-time streaming capabilities, building upon the foundation of Plan 2's distributed processing.
+
+#### **Micro-Workflow Architecture:**
+- **Individual Operator Workflows:** Separate Temporal workflows for each timeline operator (`LatestEventToStateWorkflow`, `HasExistedWorkflow`, `DurationWhereWorkflow`)
+- **Orchestrator Workflow:** `OperatorOrchestratorWorkflow` coordinates multiple operator workflows and manages their execution lifecycle
+- **Signal-Based Communication:** Operator workflows send streaming events to the orchestrator via `SignalExternalWorkflow` using the `partial-result` signal
+- **Event Partitioning:** Large datasets are partitioned across multiple operator instances for parallel processing
+- **Smart Mode Selection:** Automatically chooses between single-threaded, concurrent (Plan 2), or micro-workflow (Plan 1) modes based on data size and requirements
+
+#### **Real-Time Streaming Implementation:**
+- **Streaming Events:** Comprehensive event types including `operator_started`, `operator_completed`, `operator_failed`, `operator_timeout`, and `orchestrator_completed`
+- **Progress Tracking:** Real-time progress updates with percentage completion and metadata
+- **Signal Flow:** Individual operator workflows send signals to the parent orchestrator workflow for real-time progress updates
+- **Timeout Handling:** Configurable timeouts (default: 10 minutes) with graceful timeout event handling using Temporal's Selector pattern
+- **Fault Tolerance:** Partial failures are handled gracefully with detailed error reporting and continued processing of successful operators
+
+#### **Streaming API Integration:**
+- **Enabled by Default:** QueryWorkflow and ReplayWorkflow now have `StreamResults: true` for real-time progress tracking
+- **Signal Processing:** Orchestrator workflow processes streaming signals asynchronously while waiting for operator completion
+- **Event Aggregation:** All streaming events are collected and included in the final result metadata
+
+#### **Test Coverage (Streaming & Micro-Workflows):**
+- **`pkg/temporal/streaming_test.go`:** 9 comprehensive tests covering streaming data structures, progress tracking, and configuration
+- **`pkg/temporal/streaming_integration_test.go`:** 6 integration tests with real Temporal workflow execution, signal flow validation, and configuration testing
+- **`pkg/temporal/micro_workflows_test.go`:** 12 tests covering operator workflows, orchestrator functionality, and partitioning
+- **All tests passing:** 100% success rate across all streaming and micro-workflow test suites
+- **Real Signal Testing:** Tests validate actual signal flow between operator workflows and orchestrator
+
+#### **Kafka-Like Streaming Enhancement:**
+- **Batching Logic:** Added Kafka-style event batching that flushes when either 1000 events are accumulated OR 5 seconds have elapsed with at least 1 event
+- **Realistic Stream Processing:** Simulates real-world streaming scenarios with configurable event rates and batch timeouts
+- **Multiple Flush Triggers:** Supports size-based flush (1000 events), timeout-based flush (5s with ≥1 event), and final flush for remaining events
+- **Production-Ready Patterns:** Demonstrates how to integrate Timeline Analytics with streaming event sources
+
+#### **Key Files Implemented/Enhanced:**
+- `pkg/temporal/micro_workflows.go` - All micro-workflow implementations with streaming and timeout handling
+- `pkg/temporal/streaming_test.go` - Comprehensive streaming functionality tests (9 test cases)
+- `pkg/temporal/streaming_integration_test.go` - Real workflow execution tests with signal simulation and Kafka-like streaming (9 test cases)
+- `pkg/temporal/workflows.go` - Updated to enable streaming in QueryWorkflow and ReplayWorkflow
+- All workflows now support real-time progress updates through signal-based streaming
+
 ### ✅ **COMPLETED: Plan 2 - Activity Pool Scaling for Distributed Processing (June 2025)**
 
 **Major accomplishment:** Successfully implemented distributed Timeline Operators using Activity Pool Scaling pattern, enabling seamless processing of millions of events while maintaining backward compatibility for smaller datasets.

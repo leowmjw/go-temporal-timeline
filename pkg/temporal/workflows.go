@@ -22,6 +22,7 @@ const (
 	LoadEventsActivityName          = "load-events"
 	ProcessEventsActivityName       = "process-events"
 	ProcessEventsChunkActivityName  = "process-events-chunk"
+	ExecuteOperatorActivityName     = "execute-operator"
 	QueryVictoriaLogsActivityName   = "query-victoria-logs"
 	ReadIcebergActivityName         = "read-iceberg"
 
@@ -36,10 +37,11 @@ type EventSignal struct {
 
 // QueryRequest represents a timeline query request
 type QueryRequest struct {
-	TimelineID string                 `json:"timeline_id"`
-	Operations []QueryOperation       `json:"operations"`
-	Filters    map[string]interface{} `json:"filters,omitempty"`
-	TimeRange  *TimeRange             `json:"time_range,omitempty"`
+	TimelineID      string                 `json:"timeline_id"`
+	Operations      []QueryOperation       `json:"operations"`
+	Filters         map[string]interface{} `json:"filters,omitempty"`
+	TimeRange       *TimeRange             `json:"time_range,omitempty"`
+	ProcessingMode  string                 `json:"processing_mode,omitempty"` // "concurrent", "micro-workflow", or "single"
 }
 
 // QueryOperation represents a single operation in the query DAG
@@ -71,9 +73,10 @@ type QueryResult struct {
 
 // ReplayRequest represents a replay/backfill request
 type ReplayRequest struct {
-	TimelineID string       `json:"timeline_id"`
-	Query      QueryRequest `json:"query"`
-	ChunkSize  int          `json:"chunk_size,omitempty"`
+	TimelineID     string       `json:"timeline_id"`
+	Query          QueryRequest `json:"query"`
+	ChunkSize      int          `json:"chunk_size,omitempty"`
+	ProcessingMode string       `json:"processing_mode,omitempty"` // "concurrent", "micro-workflow", or "single"
 }
 
 // IngestionWorkflowState represents the state of an ingestion workflow
@@ -153,19 +156,45 @@ func QueryWorkflow(ctx workflow.Context, request QueryRequest) (*QueryResult, er
 	}
 
 	// Step 2: Process events through timeline operations
-	// Use concurrent processing for large datasets (>= DefaultChunkSize)
+	// Choose processing mode based on request or automatic detection
 	var result *QueryResult
-	if len(events) >= DefaultChunkSize {
+	
+	switch request.ProcessingMode {
+	case "micro-workflow":
+		logger.Info("Using micro-workflow processing", "eventCount", len(events))
+		result, err = ProcessEventsWithMicroWorkflows(ctx, events, request.Operations)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process events with micro-workflows: %w", err)
+		}
+		
+	case "concurrent":
 		logger.Info("Using concurrent processing", "eventCount", len(events))
 		result, err = ProcessEventsConcurrently(ctx, events, request.Operations)
 		if err != nil {
 			return nil, fmt.Errorf("failed to process events concurrently: %w", err)
 		}
-	} else {
+		
+	case "single":
 		logger.Info("Using single-threaded processing", "eventCount", len(events))
 		err = workflow.ExecuteActivity(ctx, ProcessEventsActivityName, events, request.Operations).Get(ctx, &result)
 		if err != nil {
 			return nil, fmt.Errorf("failed to process events: %w", err)
+		}
+		
+	default:
+		// Auto-detect processing mode based on event count and operation complexity
+		if len(events) >= DefaultChunkSize {
+			logger.Info("Auto-selecting concurrent processing", "eventCount", len(events))
+			result, err = ProcessEventsConcurrently(ctx, events, request.Operations)
+			if err != nil {
+				return nil, fmt.Errorf("failed to process events concurrently: %w", err)
+			}
+		} else {
+			logger.Info("Auto-selecting single-threaded processing", "eventCount", len(events))
+			err = workflow.ExecuteActivity(ctx, ProcessEventsActivityName, events, request.Operations).Get(ctx, &result)
+			if err != nil {
+				return nil, fmt.Errorf("failed to process events: %w", err)
+			}
 		}
 	}
 
@@ -208,23 +237,92 @@ func ReplayWorkflow(ctx workflow.Context, request ReplayRequest) (*QueryResult, 
 	logger.Info("Loaded events from Iceberg", "count", len(events))
 
 	// Step 3: Process events through timeline operations
-	// Use concurrent processing for large datasets (>= DefaultChunkSize) 
+	// Choose processing mode from request or use query's mode as fallback
+	processingMode := request.ProcessingMode
+	if processingMode == "" {
+		processingMode = request.Query.ProcessingMode
+	}
+	
 	var result *QueryResult
-	if len(events) >= DefaultChunkSize {
+	
+	switch processingMode {
+	case "micro-workflow":
+		logger.Info("Using micro-workflow processing for replay", "eventCount", len(events))
+		result, err = ProcessEventsWithMicroWorkflows(ctx, events, request.Query.Operations)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process events with micro-workflows: %w", err)
+		}
+		
+	case "concurrent":
 		logger.Info("Using concurrent processing for replay", "eventCount", len(events))
 		result, err = ProcessEventsConcurrently(ctx, events, request.Query.Operations)
 		if err != nil {
 			return nil, fmt.Errorf("failed to process events concurrently: %w", err)
 		}
-	} else {
+		
+	case "single":
 		logger.Info("Using single-threaded processing for replay", "eventCount", len(events))
 		err = workflow.ExecuteActivity(ctx, ProcessEventsActivityName, events, request.Query.Operations).Get(ctx, &result)
 		if err != nil {
 			return nil, fmt.Errorf("failed to process events: %w", err)
 		}
+		
+	default:
+		// Auto-detect processing mode based on event count
+		if len(events) >= DefaultChunkSize {
+			logger.Info("Auto-selecting concurrent processing for replay", "eventCount", len(events))
+			result, err = ProcessEventsConcurrently(ctx, events, request.Query.Operations)
+			if err != nil {
+				return nil, fmt.Errorf("failed to process events concurrently: %w", err)
+			}
+		} else {
+			logger.Info("Auto-selecting single-threaded processing for replay", "eventCount", len(events))
+			err = workflow.ExecuteActivity(ctx, ProcessEventsActivityName, events, request.Query.Operations).Get(ctx, &result)
+			if err != nil {
+				return nil, fmt.Errorf("failed to process events: %w", err)
+			}
+		}
 	}
 
 	logger.Info("Replay completed", "result", result.Result)
+	return result, nil
+}
+
+// ProcessEventsWithMicroWorkflows processes events using micro-workflow architecture (Plan 1)
+func ProcessEventsWithMicroWorkflows(ctx workflow.Context, events [][]byte, operations []QueryOperation) (*QueryResult, error) {
+	logger := workflow.GetLogger(ctx)
+	logger.Info("Starting micro-workflow processing", "totalEvents", len(events), "operations", len(operations))
+
+	// Create orchestrator request
+	request := OrchestratorRequest{
+		Operations:      operations,
+		Events:          events,
+		PartitionEvents: len(events) > DefaultPartitionSize,
+		StreamResults:   true, // Enable streaming for real-time progress updates
+	}
+
+	// Set up child workflow options for orchestrator
+	childOptions := workflow.ChildWorkflowOptions{
+		WorkflowID:   fmt.Sprintf("%s-%d", OperatorOrchestratorWorkflowName, workflow.Now(ctx).UnixNano()),
+		TaskQueue:    "timeline-operators",
+		WorkflowExecutionTimeout: time.Minute * 15,
+		RetryPolicy: &temporal.RetryPolicy{
+			MaximumAttempts: 2,
+			BackoffCoefficient: 2.0,
+		},
+	}
+
+	// Execute orchestrator workflow as child workflow
+	future := workflow.ExecuteChildWorkflow(workflow.WithChildOptions(ctx, childOptions), OperatorOrchestratorWorkflowName, request)
+	
+	var result *QueryResult
+	err := future.Get(ctx, &result)
+	if err != nil {
+		logger.Error("Micro-workflow orchestrator failed", "error", err)
+		return nil, fmt.Errorf("micro-workflow processing failed: %w", err)
+	}
+
+	logger.Info("Micro-workflow processing completed", "totalEvents", len(events), "finalResult", result.Result)
 	return result, nil
 }
 

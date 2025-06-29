@@ -50,6 +50,8 @@ type Activities interface {
 	ProcessEventsActivity(ctx context.Context, events [][]byte, operations []QueryOperation) (*QueryResult, error)
 	// New chunked processing activities
 	ProcessEventsChunkActivity(ctx context.Context, chunk EventChunk, operations []QueryOperation) (*ChunkResult, error)
+	// New micro-workflow activities
+	ExecuteOperatorActivity(ctx context.Context, events [][]byte, operation QueryOperation) (interface{}, error)
 	QueryVictoriaLogsActivity(ctx context.Context, filters map[string]interface{}, timeRange *TimeRange) ([]string, error)
 	ReadIcebergActivity(ctx context.Context, timelineID string, timeRange *TimeRange, eventPointers []string) ([][]byte, error)
 }
@@ -213,6 +215,70 @@ func (a *ActivitiesImpl) ProcessEventsChunkActivity(ctx context.Context, chunk E
 
 	a.logger.Info("Successfully processed chunk", "chunkID", chunk.ID, "result", result.Result)
 	return chunkResult, nil
+}
+
+// ExecuteOperatorActivity executes a single timeline operator
+func (a *ActivitiesImpl) ExecuteOperatorActivity(ctx context.Context, events [][]byte, operation QueryOperation) (interface{}, error) {
+	a.logger.Info("Executing operator activity", "operator", operation.Op, "eventCount", len(events))
+
+	// Report progress via heartbeat
+	info := activity.GetInfo(ctx)
+	activity.RecordHeartbeat(ctx, map[string]interface{}{
+		"operator":   operation.Op,
+		"eventCount": len(events),
+		"activityID": info.ActivityID,
+	})
+
+	// Parse and classify events
+	var classifiedEvents []timeline.TimelineEvent
+	for i, eventData := range events {
+		// Report progress every ProgressReportInterval events
+		if i%ProgressReportInterval == 0 {
+			activity.RecordHeartbeat(ctx, map[string]interface{}{
+				"operator":        operation.Op,
+				"processedEvents": i,
+				"totalEvents":     len(events),
+			})
+		}
+
+		event, err := a.classifier.ClassifyEvent(eventData)
+		if err != nil {
+			a.logger.Warn("Failed to classify event in operator", "error", err, "operator", operation.Op, "eventIndex", i)
+			continue // Skip invalid events
+		}
+		classifiedEvents = append(classifiedEvents, event)
+	}
+
+	a.logger.Info("Classified events for operator", "operator", operation.Op, "classifiedCount", len(classifiedEvents))
+
+	// Convert to EventTimeline
+	eventTimeline := make(timeline.EventTimeline, len(classifiedEvents))
+	for i, event := range classifiedEvents {
+		eventTimeline[i] = timeline.Event{
+			Timestamp: event.GetTimestamp(),
+			Type:      event.GetType(),
+			Value:     extractValue(event),
+			Attrs:     event.GetAttributes(),
+		}
+	}
+
+	// Execute the specific operator
+	processor := NewQueryProcessor()
+	result, err := processor.executeOperation(eventTimeline, operation, make(map[string]interface{}))
+	if err != nil {
+		a.logger.Error("Failed to execute operator", "error", err, "operator", operation.Op)
+		return nil, fmt.Errorf("failed to execute operator %s: %w", operation.Op, err)
+	}
+
+	// Final progress update
+	activity.RecordHeartbeat(ctx, map[string]interface{}{
+		"operator":        operation.Op,
+		"processedEvents": len(events),
+		"completed":       true,
+	})
+
+	a.logger.Info("Successfully executed operator", "operator", operation.Op, "result", result)
+	return result, nil
 }
 
 // QueryVictoriaLogsActivity queries VictoriaLogs for attribute filtering
