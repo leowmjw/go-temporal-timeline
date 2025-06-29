@@ -100,11 +100,16 @@ The Timeline Analytics Platform is a Go-based (v1.24.3+) distributed service for
 
 * **Event stream → Timeline transformation:**
 
-  * Operators: LatestEventToState, HasExisted, HasExistedWithin, AND/OR/NOT combination, DurationWhere, aggregation, windowing
+  * Operators: LatestEventToState, HasExisted, HasExistedWithin, AND/OR/NOT combination, 
+      DurationWhere, DurationInCurState, aggregation, windowing
   * Operators are Go functions acting on slices of typed events or intervals
   * Processing can occur in workflow (if data small) or as activities (for larger sets or CPU-intensive ops)
   * Operators chain as a DAG as specified in query JSON
   * Operators must be tested for all edge cases (missing fields, boundary conditions, overlapping intervals)
+
+Example: A simple credit card transaction outlier detection
+
+TL_HasExistedWithin(TL_DurationInCurState(TL_LatestEventToState(col("lat_long")), col(duration) < 10)
 
 ---
 

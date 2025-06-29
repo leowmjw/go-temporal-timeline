@@ -293,6 +293,20 @@ func TestQueryProcessor_ExecuteOperation(t *testing.T) {
 			},
 			expected: timeline.BoolTimeline{},
 		},
+		{
+			name: "DurationInCurState",
+			operation: QueryOperation{
+				ID: "stateDurations",
+				Op: "DurationInCurState",
+				Of: &QueryOperation{
+					ID:     "playStates",
+					Op:     "LatestEventToState",
+					Source: "playerStateChange",
+					Equals: "play",
+				},
+			},
+			expected: timeline.NumericTimeline{}, // Empty since no play states in test data
+		},
 	}
 
 	for _, tt := range tests {

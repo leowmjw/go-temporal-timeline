@@ -378,6 +378,20 @@ func (qp *QueryProcessor) executeOperation(events timeline.EventTimeline, op Que
 		percentile := getFloatParam(op.Params, "percentile", 50.0)
 		return timeline.Aggregate(priceTimeline, timeline.Percentile, percentile), nil
 
+	case "DurationInCurState":
+		if op.Of != nil {
+			// Execute the nested operation
+			nestedResult, err := qp.executeOperation(events, *op.Of, previousResults)
+			if err != nil {
+				return nil, err
+			}
+			if stateTimeline, ok := nestedResult.(timeline.StateTimeline); ok {
+				return timeline.DurationInCurState(stateTimeline), nil
+			}
+			return nil, fmt.Errorf("DurationInCurState operation requires StateTimeline input")
+		}
+		return nil, fmt.Errorf("DurationInCurState operation requires 'of' parameter")
+
 	case "Not":
 		if op.Of != nil {
 			// Execute the nested operation

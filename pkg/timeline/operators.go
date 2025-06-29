@@ -146,6 +146,26 @@ func DurationWhere(timeline BoolTimeline) time.Duration {
 	return totalDuration
 }
 
+// DurationInCurState calculates the duration each state has been active
+func DurationInCurState(timeline StateTimeline) NumericTimeline {
+	if len(timeline) == 0 {
+		return NumericTimeline{}
+	}
+
+	var result NumericTimeline
+
+	for _, interval := range timeline {
+		duration := interval.End.Sub(interval.Start)
+		result = append(result, NumericInterval{
+			Value: duration.Seconds(), // Duration in seconds as float64
+			Start: interval.Start,
+			End:   interval.End,
+		})
+	}
+
+	return result
+}
+
 // NOT negates a boolean timeline
 func NOT(timeline BoolTimeline) BoolTimeline {
 	if len(timeline) == 0 {
