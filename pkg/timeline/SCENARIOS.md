@@ -38,8 +38,8 @@ Flow:
 
 ## Deep Analysis #2
 
-SCENARIO: Instead, teams must be able to analyze fine-grained “micro” cohorts—such as Chrome users searching for shoes in 
-California in experiment group C while logged in. 
+SCENARIO: Instead, teams must be able to analyze fine-grained “micro” cohorts—such as Chrome users 
+    searching for shoes in California in experiment group C while logged in. 
 
 Cohort Features:
 
@@ -75,7 +75,8 @@ UserGroup as FingerPrint:
 -  Device, OS, app version, geo
 
 A micro-cohort is a fingerprint:
-A unique combination of technical, behavioral, and business-specific attributes that reveals who’s struggling—and why.
+A unique combination of technical, behavioral, and business-specific attributes that reveals 
+    who’s struggling—and why.
 
 Think:
 
@@ -99,7 +100,8 @@ MUST be able to answer:
 Goal: 
 
 - Product Teams + Owners own discovery via self-service
-- Real-Time Performance Analytics—built to unify behavior, experience, and backend performance in one live, decision-ready view.
+- Real-Time Performance Analytics—built to unify behavior, experience, and backend performance in one 
+    live, decision-ready view.
 
 Charactristic:
 

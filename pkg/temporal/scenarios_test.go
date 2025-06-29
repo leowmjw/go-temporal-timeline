@@ -45,57 +45,126 @@ func TestVideoDistributionRebuffering(t *testing.T) {
 
 	processor := NewQueryProcessor()
 
+	// TODO: Refactor to use anchor timing instead; relative; much cleaner ..
+
 	events := timeline.EventTimeline{
+		// This is init ..
 		{
 			Timestamp: time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
 			Type:      "playerStateChange",
-			Value:     "play",
+			Value:     "init",
 		},
 		{
-			Timestamp: time.Date(2025, 1, 1, 11, 50, 0, 0, time.UTC),
+			Timestamp: time.Date(2025, 1, 1, 12, 0, 5, 0, time.UTC),
 			Type:      "cdnChange",
 			Value:     "CDN1",
 		},
 		{
-			Timestamp: time.Date(2025, 1, 1, 12, 2, 0, 0, time.UTC),
-			Type:      "cdnChange",
-			Value:     "CDN2",
+			Timestamp: time.Date(2025, 1, 1, 12, 0, 7, 0, time.UTC),
+			Type:      "bitRateMeasurement",
+			Value:     "R1", // 100 MBps
+		},
+		{
+			Timestamp: time.Date(2025, 1, 1, 12, 0, 10, 0, time.UTC),
+			Type:      "playerStateChange",
+			Value:     "buffer",
+		},
+		{
+			Timestamp: time.Date(2025, 1, 1, 12, 0, 30, 0, time.UTC),
+			Type:      "playerStateChange",
+			Value:     "play",
 		},
 		{
 			Timestamp: time.Date(2025, 1, 1, 12, 1, 0, 0, time.UTC),
 			Type:      "playerStateChange",
 			Value:     "buffer",
 		},
+		{
+			Timestamp: time.Date(2025, 1, 1, 12, 1, 10, 0, time.UTC),
+			Type:      "seek",
+			Value:     "pos123",
+		},
+		{
+			Timestamp: time.Date(2025, 1, 1, 12, 1, 30, 0, time.UTC),
+			Type:      "playerStateChange",
+			Value:     "play",
+		},
+		{
+			Timestamp: time.Date(2025, 1, 1, 12, 2, 00, 0, time.UTC),
+			Type:      "playerStateChange",
+			Value:     "pause",
+		},
+		{
+			Timestamp: time.Date(2025, 1, 1, 12, 2, 15, 0, time.UTC),
+			Type:      "playerStateChange",
+			Value:     "play",
+		},
+		{
+			Timestamp: time.Date(2025, 1, 1, 12, 2, 30, 0, time.UTC),
+			Type:      "bitRateMeasurement",
+			Value:     "R2",
+		},
+		{
+			Timestamp: time.Date(2025, 1, 1, 12, 2, 40, 0, time.UTC),
+			Type:      "playerStateChange",
+			Value:     "buffer",
+		},
+		{
+			Timestamp: time.Date(2025, 1, 1, 12, 2, 50, 0, time.UTC),
+			Type:      "cdnChange",
+			Value:     "CDN2",
+		},
+		{
+			Timestamp: time.Date(2025, 1, 1, 12, 3, 30, 0, time.UTC),
+			Type:      "playerStateChange",
+			Value:     "play",
+		},
+		{
+			Timestamp: time.Date(2025, 1, 1, 12, 3, 50, 0, time.UTC),
+			Type:      "bitRateMeasurement",
+			Value:     "R1", // 100 MBps
+		},
 	}
-
-	// Just do directly ..
-	//spew.Dump(events)
-	// Convert to []TimelineEvent
-	var timelineEvents []timeline.TimelineEvent
-	for _, event := range events {
-		timelineEvents = append(timelineEvents, event)
-	}
-	// DEBUG
-	spew.Dump(timelineEvents)
-
-	qr, err := processor.ProcessQuery(timelineEvents, []QueryOperation{})
-	if err != nil {
-		t.Fatalf("ProcessQuery failed: %v", err)
-	}
-	spew.Dump(qr)
 
 	// For more complex case; can use https://github.com/sourcegraph/tf-dag
 	// Graph Operations here ... just hard code the order and dependencies ..
-	processor.executeOperation(events, QueryOperation{
-		ID:           "",
-		Op:           "",
-		Source:       "",
-		Equals:       "",
-		Window:       "",
-		Of:           nil,
-		ConditionAll: nil,
-		ConditionAny: nil,
-		Params:       nil,
+	result, err := processor.executeOperation(events, QueryOperation{
+		ID:     "bufferPeriods",
+		Op:     "LatestEventToState",
+		Source: "playerStateChange",
+		Equals: "buffer",
 	}, nil)
+	if err != nil {
+		t.Fatalf("executeOperation failed: %v", err)
+	}
 
+	spew.Dump(result)
+
+	/* RESULT: State When Buffering .. skips initial
+	=== RUN   TestVideoDistributionRebuffering
+	Skipping event {2025-01-01 12:00:05 +0000 UTC cdnChange CDN1 map[]} of type cdnChange
+	Skipping event {2025-01-01 12:00:07 +0000 UTC bitRateMeasurement R1 map[]} of type bitRateMeasurement
+	Skipping event {2025-01-01 12:01:10 +0000 UTC seek pos123 map[]} of type seek
+	Skipping event {2025-01-01 12:02:30 +0000 UTC bitRateMeasurement R2 map[]} of type bitRateMeasurement
+	Skipping event {2025-01-01 12:02:50 +0000 UTC cdnChange CDN2 map[]} of type cdnChange
+	Skipping event {2025-01-01 12:03:50 +0000 UTC bitRateMeasurement R1 map[]} of type bitRateMeasurement
+	(timeline.StateTimeline) (len=3 cap=4) {
+	 (timeline.StateInterval) {
+	  State: (string) (len=6) "buffer",
+	  Start: (time.Time) 2025-01-01 12:00:10 +0000 UTC,
+	  End: (time.Time) 2025-01-01 12:00:30 +0000 UTC
+	 },
+	 (timeline.StateInterval) {
+	  State: (string) (len=6) "buffer",
+	  Start: (time.Time) 2025-01-01 12:01:00 +0000 UTC,
+	  End: (time.Time) 2025-01-01 12:01:30 +0000 UTC
+	 },
+	 (timeline.StateInterval) {
+	  State: (string) (len=6) "buffer",
+	  Start: (time.Time) 2025-01-01 12:02:40 +0000 UTC,
+	  End: (time.Time) 2025-01-01 12:03:30 +0000 UTC
+	 }
+	}
+
+	*/
 }
