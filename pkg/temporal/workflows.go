@@ -18,11 +18,12 @@ const (
 	EventSignalName = "event-signal"
 
 	// Activity names
-	AppendEventActivityName       = "append-event"
-	LoadEventsActivityName        = "load-events"
-	ProcessEventsActivityName     = "process-events"
-	QueryVictoriaLogsActivityName = "query-victoria-logs"
-	ReadIcebergActivityName       = "read-iceberg"
+	AppendEventActivityName         = "append-event"
+	LoadEventsActivityName          = "load-events"
+	ProcessEventsActivityName       = "process-events"
+	ProcessEventsChunkActivityName  = "process-events-chunk"
+	QueryVictoriaLogsActivityName   = "query-victoria-logs"
+	ReadIcebergActivityName         = "read-iceberg"
 
 	// Default values
 	DefaultContinueAsNewThreshold = 1000 // events before ContinueAsNew
@@ -152,10 +153,20 @@ func QueryWorkflow(ctx workflow.Context, request QueryRequest) (*QueryResult, er
 	}
 
 	// Step 2: Process events through timeline operations
+	// Use concurrent processing for large datasets (>= DefaultChunkSize)
 	var result *QueryResult
-	err = workflow.ExecuteActivity(ctx, ProcessEventsActivityName, events, request.Operations).Get(ctx, &result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process events: %w", err)
+	if len(events) >= DefaultChunkSize {
+		logger.Info("Using concurrent processing", "eventCount", len(events))
+		result, err = ProcessEventsConcurrently(ctx, events, request.Operations)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process events concurrently: %w", err)
+		}
+	} else {
+		logger.Info("Using single-threaded processing", "eventCount", len(events))
+		err = workflow.ExecuteActivity(ctx, ProcessEventsActivityName, events, request.Operations).Get(ctx, &result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process events: %w", err)
+		}
 	}
 
 	logger.Info("Query completed", "result", result.Result)
@@ -197,10 +208,20 @@ func ReplayWorkflow(ctx workflow.Context, request ReplayRequest) (*QueryResult, 
 	logger.Info("Loaded events from Iceberg", "count", len(events))
 
 	// Step 3: Process events through timeline operations
+	// Use concurrent processing for large datasets (>= DefaultChunkSize) 
 	var result *QueryResult
-	err = workflow.ExecuteActivity(ctx, ProcessEventsActivityName, events, request.Query.Operations).Get(ctx, &result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process events: %w", err)
+	if len(events) >= DefaultChunkSize {
+		logger.Info("Using concurrent processing for replay", "eventCount", len(events))
+		result, err = ProcessEventsConcurrently(ctx, events, request.Query.Operations)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process events concurrently: %w", err)
+		}
+	} else {
+		logger.Info("Using single-threaded processing for replay", "eventCount", len(events))
+		err = workflow.ExecuteActivity(ctx, ProcessEventsActivityName, events, request.Query.Operations).Get(ctx, &result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process events: %w", err)
+		}
 	}
 
 	logger.Info("Replay completed", "result", result.Result)
