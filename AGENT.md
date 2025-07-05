@@ -501,6 +501,71 @@ go build
 * Use VictoriaLogs to minimize scan/read cost for attribute filtering and high-cardinality queries
 * Prefer column/predicate pushdown in Iceberg reads to minimize data movement
 * Implement all new Timeline operators with full unit and scenario-based test coverage
+
+---
+
+### 9. Credit Card Fraud Detection Implementation
+
+#### Overview
+The credit card fraud detection system uses timeline operators to identify suspicious transaction patterns, particularly focusing on impossible travel scenarios where transactions occur in different locations within timeframes that make physical travel impossible.
+
+#### Key Components
+
+**Location Structure**
+```go
+type Location struct {
+	City  string  // City name
+	State string  // State/province/country code
+	Lat   float64 // Latitude
+	Lng   float64 // Longitude
+	Type  string  // Transaction type ("online", "in-store")
+}
+```
+
+**Helper Functions**
+- `normalizeLocation`: Parses location data from event values into structured Location objects
+- `calculateDistance`: Implements the Haversine formula to compute distance between coordinates
+- `isPossibleTravel`: Determines if travel between locations within a timeframe is physically possible
+
+**Core Detection Logic**
+- `detectAdvancedFraudWithOperators`: Composes existing timeline operators (`HasExistedWithin`, `AND`, `OR`) to detect fraud
+  - Groups events by normalized location keys (city+state, case-insensitive)
+  - Identifies suspicious location pairs where travel is physically impossible
+  - Uses time windows to detect overlapping transactions in different locations
+
+#### Test Scenarios
+The implementation includes a comprehensive test suite (`TestCreditCardFraudScenarios`) covering:
+1. No fraud - Transactions far apart in time
+2. Clear fraud - Cross-country transactions within minutes
+3. Legitimate travel - Driving between nearby cities
+4. Same city with different casing (e.g., "New York" vs "new york")
+5. Same-named cities in different states (e.g., Springfield, IL vs Springfield, MO)
+6. Online + in-store fraud combinations
+7. Flood attack with multiple cities in short timeframe
+
+#### Implementation Notes
+- Uses only existing timeline operators through composition (no new operators)
+- Incorporates spatial awareness with structured location data
+- Handles edge cases like same-named cities and case differences
+- Special handling for online transactions vs in-store transactions
+- Optimized for maintainability and readability
+
+#### Usage Example
+```go
+// Create event timeline with transaction events
+events := timeline.EventTimeline{...}
+
+// Detect fraud intervals
+fraudIntervals := detectAdvancedFraudWithOperators(events, 30*time.Minute)
+
+// Check if there was fraud in a specific time period
+hasFraud := len(fraudIntervals) > 0
+```
+
+#### Future Enhancements
+- Multi-leg travel detection for more complex legitimate travel patterns
+- Time zone boundary crossing scenarios
+- Performance optimization for large event timelines
 * **Concurrent Processing:** Large datasets (≥10K events) automatically use distributed processing; small datasets use single-threaded for simplicity
 * When testing distributed systems, focus on business logic rather than framework orchestration
 * **IMPORTANT:** Respect the NumericTimeline vs PriceTimeline type separation detailed above
