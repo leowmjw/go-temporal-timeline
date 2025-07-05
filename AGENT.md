@@ -1,5 +1,68 @@
 # AGENT.md
 
+## Latest Update: Multi-Customer Fraud Detection Implementation (July 5, 2025)
+
+### Multi-Customer Fraud Detection Implementation
+
+#### Overview
+We've implemented a scalable multi-customer credit card fraud detection system using Temporal workflows. This approach spawns dedicated child workflows for each customer to process their transactions in parallel, while keeping the core fraud detection logic unchanged.
+
+#### Key Components
+
+1. **Core Files**
+   - `fraud_workflow.go`: Contains workflow definitions for both single-customer and multi-customer processing
+   - `fraud_detection.go`: Contains the core fraud detection logic (migrated from test file)
+   - `fraud_workflow_test.go`: Unit tests for both workflows
+
+2. **Workflows**
+   - `CreditCardFraudWorkflow`: Processes a single customer's transactions
+   - `ProcessMultiCustomerFraudWorkflow`: Orchestrates multiple child workflows, one per customer
+
+3. **Data Structures**
+   - `CreditCardFraudRequest`: Input structure containing customer ID, events, window, and time boundaries
+   - `CreditCardFraudResult`: Output structure with fraud detection results and execution metrics
+   - `Location`: Structure for transaction location data with coordinates and type
+
+4. **Detection Logic**
+   - Uses the `detectCreditCardFraud` function (refactored from `detectAdvancedFraudWithOperators`)
+   - Detects impossible travel patterns using timeline operators (`HasExistedWithin`, `AND`, `OR`)
+   - Calculates travel feasibility with the Haversine formula and time windows
+
+#### Design Advantages
+
+1. **Scalability**: Parallel processing of customers allows for horizontal scaling
+2. **Isolation**: Each customer's data is processed independently
+3. **Resilience**: Failure in one customer's workflow doesn't affect others
+4. **Maintainability**: Core detection logic is untouched and encapsulated
+
+#### Implementation Notes
+
+1. **Workflow IDs**
+   - Child workflows use ID format: `fraud-cc-{customerID}-{timestamp}`
+   - Ensures uniqueness and allows for tracking/querying by customer
+
+2. **Testing Strategy**
+   - Unit tests for individual customer workflow
+   - Unit tests for multi-customer orchestration
+   - Integration test skeleton (disabled) for end-to-end testing with a Temporal server
+
+3. **Key Optimizations**
+   - `FraudLocation` type for structured location data
+   - Efficient location pair analysis to minimize unnecessary distance calculations
+   - Early termination when impossible travel is detected
+
+#### Next Steps
+
+1. **End-to-End Testing**: Enable and expand integration tests with a real Temporal server
+2. **Activity Implementation**: Add activities for loading customer data from databases
+3. **Performance Optimization**: Profile and optimize for large customer sets
+4. **Error Handling**: Add more robust error handling and retries
+
+#### Technical Debt / Known Issues
+
+1. The `go.mod` file has a warning: "github.com/davecgh/go-spew should be direct" that should be addressed
+2. The helper functions in `fraud_detection.go` should be reviewed for DRY violations
+
 ## Timeline Analytics Platform: Implementation Brief for Handoff
 
 ### Purpose

@@ -3,6 +3,7 @@ module github.com/leowmjw/go-temporal-timeline
 go 1.24.3
 
 require (
+	github.com/davecgh/go-spew v1.1.1
 	github.com/hashicorp/hcl/v2 v2.23.0
 	github.com/stretchr/testify v1.10.0
 	github.com/zclconf/go-cty v1.16.3
@@ -12,7 +13,6 @@ require (
 require (
 	github.com/agext/levenshtein v1.2.3 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/facebookgo/clock v0.0.0-20150410010913-600d898af40a // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/mock v1.6.0 // indirect
