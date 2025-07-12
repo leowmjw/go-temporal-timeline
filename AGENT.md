@@ -58,10 +58,33 @@ We've implemented a scalable multi-customer credit card fraud detection system u
 3. **Performance Optimization**: Profile and optimize for large customer sets
 4. **Error Handling**: Add more robust error handling and retries
 
+#### **E2E Integration Test Implementation**
+
+1. **`TestIntegrationCreditCardFraudWorkflow`**: Comprehensive end-to-end test that simulates real-world fraud detection
+2. **Test Execution**: Only runs with `E2E_TEST=true` environment variable to skip in normal CI/CD
+3. **Data Generation**: Creates 80-100 customers with 500-1000 total events distributed over 2 hours using current time as base
+4. **Fraud Scenarios**: Implements impossible travel patterns (NY to LA in 5 minutes) for ~3% of customers
+5. **VictoriaLogs Integration**: Mock implementation for data insertion and querying
+6. **Result Analysis**: Comprehensive metrics including precision, recall, accuracy, and processing times
+7. **Performance Summary**: Detailed tabular output showing fraud detection effectiveness
+
+#### **Test Execution Commands**
+```bash
+# Run basic fraud tests (always available)
+go test ./pkg/temporal/ -v -run TestCreditCardFraudWorkflow
+
+# Run E2E integration test (requires E2E_TEST=true)
+E2E_TEST=true go test ./pkg/temporal/ -v -run TestIntegrationCreditCardFraudWorkflow
+
+# Skip E2E test in short mode
+go test ./pkg/temporal/ -short -v -run TestIntegrationCreditCardFraudWorkflow
+```
+
 #### Technical Debt / Known Issues
 
 1. The `go.mod` file has a warning: "github.com/davecgh/go-spew should be direct" that should be addressed
 2. The helper functions in `fraud_detection.go` should be reviewed for DRY violations
+3. E2E test fraud detection rate is currently 100% due to aggressive fraud logic - should be tuned to realistic 3% rate
 
 ## Timeline Analytics Platform: Implementation Brief for Handoff
 
