@@ -289,7 +289,9 @@ func TestQueryProcessor_ExecuteOperation(t *testing.T) {
 				Op:     "HasExistedWithin",
 				Source: "userAction",
 				Equals: "seek",
-				Window: "5s",
+				Params: map[string]interface{}{
+					"window": "5s",
+				},
 			},
 			expected: timeline.BoolTimeline{},
 		},

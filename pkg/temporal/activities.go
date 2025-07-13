@@ -389,7 +389,17 @@ func (qp *QueryProcessor) executeOperation(events timeline.EventTimeline, op Que
 
 	case "HasExistedWithin":
 		filteredEvents := filterEventsByType(events, op.Source)
-		window, err := time.ParseDuration(op.Window)
+		windowParam, exists := op.Params["window"]
+		if !exists {
+			return nil, fmt.Errorf("HasExistedWithin operation requires 'window' parameter")
+		}
+		
+		windowStr, ok := windowParam.(string)
+		if !ok {
+			return nil, fmt.Errorf("window parameter must be a string")
+		}
+		
+		window, err := time.ParseDuration(windowStr)
 		if err != nil {
 			return nil, fmt.Errorf("invalid window duration: %w", err)
 		}
@@ -593,19 +603,25 @@ func (qp *QueryProcessor) executeOperation(events timeline.EventTimeline, op Que
 		return timeline.OR(timelines...), nil
 
 	case "LongestConsecutiveTrueDuration":
-		// Get source timeline from previous results
-		if op.Source == "" {
-			return nil, fmt.Errorf("LongestConsecutiveTrueDuration operation requires 'source' parameter")
+		// Get source operation ID from params
+		sourceOperationId, exists := op.Params["sourceOperationId"]
+		if !exists {
+			return nil, fmt.Errorf("LongestConsecutiveTrueDuration operation requires 'sourceOperationId' parameter")
 		}
 		
-		sourceResult, exists := previousResults[op.Source]
+		sourceOperationIdStr, ok := sourceOperationId.(string)
+		if !ok {
+			return nil, fmt.Errorf("sourceOperationId parameter must be a string")
+		}
+		
+		sourceResult, exists := previousResults[sourceOperationIdStr]
 		if !exists {
-			return nil, fmt.Errorf("source timeline '%s' not found", op.Source)
+			return nil, fmt.Errorf("source operation '%s' did not produce a result", sourceOperationIdStr)
 		}
 		
 		boolTimeline, ok := sourceResult.(timeline.BoolTimeline)
 		if !ok {
-			return nil, fmt.Errorf("LongestConsecutiveTrueDuration operation requires BoolTimeline input")
+			return nil, fmt.Errorf("source operation '%s' did not produce a BoolTimeline", sourceOperationIdStr)
 		}
 		
 		// Parse optional minimum duration parameter

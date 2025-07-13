@@ -39,7 +39,9 @@ func TestLongestConsecutiveTrueDurationIntegration(t *testing.T) {
 			{
 				ID:     "longest_consecutive",
 				Op:     "LongestConsecutiveTrueDuration",
-				Source: "play_exists",
+				Params: map[string]interface{}{
+					"sourceOperationId": "play_exists",
+				},
 			},
 		}
 
@@ -73,8 +75,8 @@ func TestLongestConsecutiveTrueDurationIntegration(t *testing.T) {
 			{
 				ID:     "longest_consecutive_filtered",
 				Op:     "LongestConsecutiveTrueDuration",
-				Source: "play_exists",
 				Params: map[string]interface{}{
+					"sourceOperationId": "play_exists",
 					"duration": "72h", // 3 days minimum
 				},
 			},

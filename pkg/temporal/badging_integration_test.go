@@ -63,9 +63,11 @@ func TestEvaluateBadgeActivity_StreakMaintainer_Simple(t *testing.T) {
 					Equals: "true",
 				},
 				{
-					ID:     "payment_duration",
-					Op:     "DurationWhere",
-					ConditionAll: []string{"payment_exists"},
+					ID:     "longest_consecutive",
+					Op:     "LongestConsecutiveTrueDuration",
+					Params: map[string]interface{}{
+						"sourceOperationId": "payment_exists",
+					},
 				},
 			},
 			badgeType:      StreakMaintainerBadge,
@@ -144,13 +146,76 @@ func TestEvaluateBadgeActivity_DailyEngagement_Simple(t *testing.T) {
 					Op:     "HasExistedWithin",
 					Source: "app_open",
 					Equals: "true",
-					Window: "24h",
+					Params: map[string]interface{}{
+						"window": "24h",
+					},
 				},
 			},
 			badgeType:      DailyEngagementBadge,
 			userID:         "user-123",
 			expectedEarned: false, // HasExistedWithin alone won't earn the badge
 			minProgress:    0.0,
+		},
+		{
+			name: "positive streak maintainer - 14+ day streak",
+			events: [][]byte{
+				[]byte(`{"event_type": "payment_successful", "timestamp": "2025-01-01T10:00:00Z", "user_id": "user-123", "value": "true"}`),
+				[]byte(`{"event_type": "payment_successful", "timestamp": "2025-01-16T10:00:00Z", "user_id": "user-123", "value": "true"}`), // 15 days later
+			},
+			operations: []QueryOperation{
+				{
+					ID:     "payment_successful_exists",
+					Op:     "HasExisted",
+					Source: "payment_successful",
+					Equals: "true",
+				},
+				{
+					ID:     "longest_streak",
+					Op:     "LongestConsecutiveTrueDuration",
+					Params: map[string]interface{}{
+						"sourceOperationId": "payment_successful_exists",
+					},
+				},
+			},
+			badgeType:      StreakMaintainerBadge,
+			userID:         "user-123",
+			expectedEarned: true, // Should earn badge with 15-day streak
+			minProgress:    1.0,
+		},
+		{
+			name: "positive daily engagement - 7+ day streak",
+			events: [][]byte{
+				[]byte(`{"event_type": "app_open", "timestamp": "2025-01-01T10:00:00Z", "user_id": "user-123", "value": "true"}`),
+				[]byte(`{"event_type": "app_open", "timestamp": "2025-01-02T10:00:00Z", "user_id": "user-123", "value": "true"}`),
+				[]byte(`{"event_type": "app_open", "timestamp": "2025-01-03T10:00:00Z", "user_id": "user-123", "value": "true"}`),
+				[]byte(`{"event_type": "app_open", "timestamp": "2025-01-04T10:00:00Z", "user_id": "user-123", "value": "true"}`),
+				[]byte(`{"event_type": "app_open", "timestamp": "2025-01-05T10:00:00Z", "user_id": "user-123", "value": "true"}`),
+				[]byte(`{"event_type": "app_open", "timestamp": "2025-01-06T10:00:00Z", "user_id": "user-123", "value": "true"}`),
+				[]byte(`{"event_type": "app_open", "timestamp": "2025-01-07T10:00:00Z", "user_id": "user-123", "value": "true"}`),
+				[]byte(`{"event_type": "app_open", "timestamp": "2025-01-08T10:00:00Z", "user_id": "user-123", "value": "true"}`), // 8 days total
+			},
+			operations: []QueryOperation{
+				{
+					ID:     "app_open_within_day",
+					Op:     "HasExistedWithin",
+					Source: "app_open",
+					Equals: "true",
+					Params: map[string]interface{}{
+						"window": "24h",
+					},
+				},
+				{
+					ID:     "longest_engagement",
+					Op:     "LongestConsecutiveTrueDuration",
+					Params: map[string]interface{}{
+						"sourceOperationId": "app_open_within_day",
+					},
+				},
+			},
+			badgeType:      DailyEngagementBadge,
+			userID:         "user-123",
+			expectedEarned: true, // Should earn badge with 7-day streak
+			minProgress:    1.0,
 		},
 	}
 

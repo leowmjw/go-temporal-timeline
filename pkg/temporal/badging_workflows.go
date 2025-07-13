@@ -1,6 +1,8 @@
 package temporal
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"time"
 
@@ -89,7 +91,9 @@ func StreakMaintainerWorkflow(ctx workflow.Context, request BadgeRequest) (*Badg
 		{
 			ID:     "longest_streak",
 			Op:     "LongestConsecutiveTrueDuration",
-			Source: "on_time_bool_timeline",
+			Params: map[string]interface{}{
+				"sourceOperationId": "on_time_bool_timeline",
+			},
 		},
 	}
 
@@ -132,21 +136,27 @@ func DailyEngagementWorkflow(ctx workflow.Context, request BadgeRequest) (*Badge
 			Op:     "HasExistedWithin",
 			Source: "app_open",
 			Equals: "true",
-			Window: "24h",
+			Params: map[string]interface{}{
+				"window": "24h",
+			},
 		},
 		{
 			ID:     "user_interaction_within_day", 
 			Op:     "HasExistedWithin",
 			Source: "user_interaction",
 			Equals: "true",
-			Window: "24h",
+			Params: map[string]interface{}{
+				"window": "24h",
+			},
 		},
 		{
 			ID:     "post_created_within_day",
 			Op:     "HasExistedWithin",
 			Source: "post_created",
 			Equals: "true",
-			Window: "24h",
+			Params: map[string]interface{}{
+				"window": "24h",
+			},
 		},
 		{
 			ID:     "daily_activity_bool_timeline",
@@ -156,7 +166,9 @@ func DailyEngagementWorkflow(ctx workflow.Context, request BadgeRequest) (*Badge
 		{
 			ID:     "longest_engagement_streak",
 			Op:     "LongestConsecutiveTrueDuration",
-			Source: "daily_activity_bool_timeline",
+			Params: map[string]interface{}{
+				"sourceOperationId": "daily_activity_bool_timeline",
+			},
 		},
 	}
 
@@ -173,5 +185,10 @@ func DailyEngagementWorkflow(ctx workflow.Context, request BadgeRequest) (*Badge
 
 // GenerateBadgeWorkflowID creates a workflow ID for badge evaluation
 func GenerateBadgeWorkflowID(userID, badgeType string) string {
-	return fmt.Sprintf("%s%s-%s-%d", BadgeWorkflowIDPrefix, userID, badgeType, time.Now().UnixNano())
+	// Use crypto/rand for additional uniqueness to prevent collisions in high-speed tests
+	var randomBytes [8]byte
+	rand.Read(randomBytes[:])
+	randomValue := binary.LittleEndian.Uint64(randomBytes[:])
+	
+	return fmt.Sprintf("%s%s-%s-%d-%d", BadgeWorkflowIDPrefix, userID, badgeType, time.Now().UnixNano(), randomValue)
 }

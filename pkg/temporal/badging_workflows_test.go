@@ -133,15 +133,26 @@ func TestGenerateBadgeWorkflowID(t *testing.T) {
 				t.Errorf("Expected workflow ID to start with '%s', got '%s'", expectedPrefix, id)
 			}
 			
-			// Check that the ID contains a timestamp suffix (numeric)
+			// Check that the ID contains a timestamp-random suffix
 			suffix := strings.TrimPrefix(id, expectedPrefix)
 			if len(suffix) == 0 {
-				t.Error("Expected workflow ID to have a timestamp suffix")
+				t.Error("Expected workflow ID to have a timestamp-random suffix")
 			}
 			
-			// Verify the suffix is numeric (timestamp)
-			if _, err := strconv.ParseInt(suffix, 10, 64); err != nil {
-				t.Errorf("Expected workflow ID suffix to be numeric timestamp, got '%s'", suffix)
+			// Verify the suffix contains both timestamp and random value (separated by -)
+			parts := strings.Split(suffix, "-")
+			if len(parts) != 2 {
+				t.Errorf("Expected workflow ID suffix to be timestamp-random format, got '%s'", suffix)
+				return
+			}
+			
+			// Verify both parts are numeric
+			if _, err := strconv.ParseInt(parts[0], 10, 64); err != nil {
+				t.Errorf("Expected first part of suffix to be numeric timestamp, got '%s'", parts[0])
+			}
+			
+			if _, err := strconv.ParseUint(parts[1], 10, 64); err != nil {
+				t.Errorf("Expected second part of suffix to be numeric random value, got '%s'", parts[1])
 			}
 		})
 	}
@@ -151,48 +162,63 @@ func TestBadgeWorkflowOperations_StreakMaintainer(t *testing.T) {
 	// Test that the operations structure for streak maintainer is correct
 	operations := []QueryOperation{
 		{
-			ID:     "on_time_payments",
-			Op:     "and",
-			ConditionAll: []string{
-				"has_existed:payment_successful",
-				"not:has_existed:payment_due",
+			ID:     "payment_successful_exists",
+			Op:     "HasExisted",
+			Source: "payment_successful",
+			Equals: "true",
+		},
+		{
+			ID:     "payment_due_not_exists",
+			Op:     "Not",
+			Of: &QueryOperation{
+				Op:     "HasExisted",
+				Source: "payment_due",
+				Equals: "true",
 			},
 		},
 		{
-			ID:     "streak_duration",
-			Op:     "duration_in_cur_state",
-			Source: "on_time_payments",
+			ID:     "on_time_bool_timeline",
+			Op:     "AND",
+			ConditionAll: []string{"payment_successful_exists", "payment_due_not_exists"},
+		},
+		{
+			ID:     "longest_streak",
+			Op:     "LongestConsecutiveTrueDuration",
 			Params: map[string]interface{}{
-				"state":    "true",
-				"duration": "14d",
+				"sourceOperationId": "on_time_bool_timeline",
 			},
 		},
 	}
 
-	if len(operations) != 2 {
-		t.Errorf("Expected 2 operations, got %d", len(operations))
+	if len(operations) != 4 {
+		t.Errorf("Expected 4 operations, got %d", len(operations))
 	}
 
 	firstOp := operations[0]
-	if firstOp.ID != "on_time_payments" {
-		t.Errorf("Expected first operation ID 'on_time_payments', got '%s'", firstOp.ID)
+	if firstOp.ID != "payment_successful_exists" {
+		t.Errorf("Expected first operation ID 'payment_successful_exists', got '%s'", firstOp.ID)
 	}
 
-	if firstOp.Op != "and" {
-		t.Errorf("Expected first operation type 'and', got '%s'", firstOp.Op)
+	if firstOp.Op != "HasExisted" {
+		t.Errorf("Expected first operation type 'HasExisted', got '%s'", firstOp.Op)
 	}
 
-	if len(firstOp.ConditionAll) != 2 {
-		t.Errorf("Expected 2 conditions, got %d", len(firstOp.ConditionAll))
+	andOp := operations[2]
+	if andOp.Op != "AND" {
+		t.Errorf("Expected AND operation, got '%s'", andOp.Op)
 	}
 
-	secondOp := operations[1]
-	if secondOp.ID != "streak_duration" {
-		t.Errorf("Expected second operation ID 'streak_duration', got '%s'", secondOp.ID)
+	if len(andOp.ConditionAll) != 2 {
+		t.Errorf("Expected 2 conditions in AND operation, got %d", len(andOp.ConditionAll))
 	}
 
-	if secondOp.Source != "on_time_payments" {
-		t.Errorf("Expected second operation source 'on_time_payments', got '%s'", secondOp.Source)
+	finalOp := operations[3]
+	if finalOp.ID != "longest_streak" {
+		t.Errorf("Expected final operation ID 'longest_streak', got '%s'", finalOp.ID)
+	}
+
+	if finalOp.Op != "LongestConsecutiveTrueDuration" {
+		t.Errorf("Expected final operation type 'LongestConsecutiveTrueDuration', got '%s'", finalOp.Op)
 	}
 }
 
@@ -200,58 +226,74 @@ func TestBadgeWorkflowOperations_DailyEngagement(t *testing.T) {
 	// Test that the operations structure for daily engagement is correct
 	operations := []QueryOperation{
 		{
-			ID: "daily_active",
-			Op: "has_existed_within",
-			ConditionAny: []string{
-				"app_open",
-				"user_interaction", 
-				"post_created",
+			ID:     "app_open_within_day",
+			Op:     "HasExistedWithin",
+			Source: "app_open",
+			Equals: "true",
+			Params: map[string]interface{}{
+				"window": "24h",
 			},
-			Window: "1d",
 		},
 		{
-			ID:     "engagement_streak",
-			Op:     "duration_in_cur_state",
-			Source: "daily_active",
+			ID:     "user_interaction_within_day", 
+			Op:     "HasExistedWithin",
+			Source: "user_interaction",
+			Equals: "true",
 			Params: map[string]interface{}{
-				"state":    "true",
-				"duration": "7d",
+				"window": "24h",
+			},
+		},
+		{
+			ID:     "post_created_within_day",
+			Op:     "HasExistedWithin",
+			Source: "post_created",
+			Equals: "true",
+			Params: map[string]interface{}{
+				"window": "24h",
+			},
+		},
+		{
+			ID:     "daily_activity_bool_timeline",
+			Op:     "OR",
+			ConditionAny: []string{"app_open_within_day", "user_interaction_within_day", "post_created_within_day"},
+		},
+		{
+			ID:     "longest_engagement_streak",
+			Op:     "LongestConsecutiveTrueDuration",
+			Params: map[string]interface{}{
+				"sourceOperationId": "daily_activity_bool_timeline",
 			},
 		},
 	}
 
-	if len(operations) != 2 {
-		t.Errorf("Expected 2 operations, got %d", len(operations))
+	if len(operations) != 5 {
+		t.Errorf("Expected 5 operations, got %d", len(operations))
 	}
 
 	firstOp := operations[0]
-	if firstOp.ID != "daily_active" {
-		t.Errorf("Expected first operation ID 'daily_active', got '%s'", firstOp.ID)
+	if firstOp.ID != "app_open_within_day" {
+		t.Errorf("Expected first operation ID 'app_open_within_day', got '%s'", firstOp.ID)
 	}
 
-	if firstOp.Op != "has_existed_within" {
-		t.Errorf("Expected first operation type 'has_existed_within', got '%s'", firstOp.Op)
+	if firstOp.Op != "HasExistedWithin" {
+		t.Errorf("Expected first operation type 'HasExistedWithin', got '%s'", firstOp.Op)
 	}
 
-	if firstOp.Window != "1d" {
-		t.Errorf("Expected window '1d', got '%s'", firstOp.Window)
+	orOp := operations[3]
+	if orOp.Op != "OR" {
+		t.Errorf("Expected OR operation, got '%s'", orOp.Op)
 	}
 
-	if len(firstOp.ConditionAny) != 3 {
-		t.Errorf("Expected 3 conditions, got %d", len(firstOp.ConditionAny))
+	if len(orOp.ConditionAny) != 3 {
+		t.Errorf("Expected 3 conditions in OR operation, got %d", len(orOp.ConditionAny))
 	}
 
-	secondOp := operations[1]
-	if secondOp.ID != "engagement_streak" {
-		t.Errorf("Expected second operation ID 'engagement_streak', got '%s'", secondOp.ID)
+	finalOp := operations[4]
+	if finalOp.ID != "longest_engagement_streak" {
+		t.Errorf("Expected final operation ID 'longest_engagement_streak', got '%s'", finalOp.ID)
 	}
 
-	if secondOp.Source != "daily_active" {
-		t.Errorf("Expected second operation source 'daily_active', got '%s'", secondOp.Source)
-	}
-
-	duration, ok := secondOp.Params["duration"].(string)
-	if !ok || duration != "7d" {
-		t.Errorf("Expected duration '7d', got %v", secondOp.Params["duration"])
+	if finalOp.Op != "LongestConsecutiveTrueDuration" {
+		t.Errorf("Expected final operation type 'LongestConsecutiveTrueDuration', got '%s'", finalOp.Op)
 	}
 }
