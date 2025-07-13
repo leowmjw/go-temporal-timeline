@@ -3,6 +3,7 @@ package temporal
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
 	"testing"
 	"time"
@@ -17,7 +18,7 @@ import (
 
 // Helper function to create event for testing
 func createTestEvent(timestamp time.Time, city, state string, lat, lng float64, transType string, customerID string) timeline.Event {
-	loc := Location{
+	loc := FraudLocation{
 		City:  city,
 		State: state,
 		Lat:   lat,
@@ -226,8 +227,8 @@ func TestIntegrationCreditCardFraudWorkflow(t *testing.T) {
 	t.Log("Starting E2E Credit Card Fraud Detection Test")
 
 	// Use current time as base
-	baseTime := time.Now().Add(-2 * time.Hour) // 2 hours ago
-	endTime := time.Now()
+	baseTime := time.Date(2025, 7, 14, 12, 0, 0, 0, time.UTC) // Fixed base time
+	endTime := baseTime.Add(2 * time.Hour)
 	
 	// Generate realistic test data
 	testData := generateFraudTestData(baseTime, endTime)
@@ -341,8 +342,9 @@ func generateFraudTestData(startTime, endTime time.Time) *FraudTestData {
 		FraudCustomers: make(map[string]bool),
 	}
 
-	// Generate 80-100 customers
-	numCustomers := 80 + (time.Now().UnixNano() % 21) // 80-100 customers
+	// Generate 80-100 customers (deterministic for testing)
+	rand.Seed(12345) // Fixed seed for reproducible tests
+	numCustomers := 80 + (rand.Int63() % 21) // 80-100 customers
 	
 	// Common US cities with coordinates
 	cities := []struct {
@@ -389,7 +391,7 @@ func generateFraudTestData(startTime, endTime time.Time) *FraudTestData {
 		data.FraudCustomers[customerID] = isFraudCustomer
 		
 		// Generate 5-12 events per customer over 2 hours
-		eventsPerCustomer := 5 + (int(time.Now().UnixNano()+int64(i)) % 8)
+		eventsPerCustomer := 5 + (rand.Intn(8))
 		var customerEvents timeline.EventTimeline
 		
 		if isFraudCustomer {
@@ -421,7 +423,7 @@ func generateFraudulentTransactions(customerID string, startTime, endTime time.T
 	duration := endTime.Sub(startTime)
 	
 	// Pick a "home" city for this customer  
-	homeCity := cities[int(time.Now().UnixNano()+int64(len(customerID))) % len(cities)]
+	homeCity := cities[rand.Intn(len(cities))]
 	
 	for i := 0; i < count; i++ {
 		// Distribute events over time period
@@ -445,7 +447,7 @@ func generateFraudulentTransactions(customerID string, startTime, endTime time.T
 			city := homeCity
 			if i%4 == 0 && i > 2 {
 				// Occasional reasonable travel
-				city = cities[(int(time.Now().UnixNano())+i) % len(cities)]
+				city = cities[rand.Intn(len(cities))]
 			}
 			
 			event := createTestEvent(eventTime, city.name, city.state, city.lat, city.lng, "in-store", customerID)
@@ -467,7 +469,7 @@ func generateLegitimateTransactions(customerID string, startTime, endTime time.T
 	duration := endTime.Sub(startTime)
 	
 	// Pick a "home" city for this customer
-	homeCity := cities[int(time.Now().UnixNano()+int64(len(customerID))) % len(cities)]
+	homeCity := cities[rand.Intn(len(cities))]
 	
 	// Define nearby cities for realistic travel (within same state or nearby states)
 	nearbyCities := []struct {
@@ -516,7 +518,7 @@ func generateLegitimateTransactions(customerID string, startTime, endTime time.T
 	for i := 0; i < count; i++ {
 		// Distribute events over time period with some randomness
 		baseOffset := time.Duration(float64(duration) * float64(i) / float64(count))
-		randomOffset := time.Duration((time.Now().UnixNano() + int64(i)) % int64(duration/8))
+		randomOffset := time.Duration(rand.Int63n(int64(duration/8)))
 		eventTime := startTime.Add(baseOffset + randomOffset)
 		
 		var city struct {

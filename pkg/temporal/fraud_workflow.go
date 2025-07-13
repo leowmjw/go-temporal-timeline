@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/leowmjw/go-temporal-timeline/pkg/timeline"
+	"go.temporal.io/api/enums/v1"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -70,7 +72,7 @@ func CreditCardFraudWorkflow(ctx workflow.Context, request CreditCardFraudReques
 	}
 	
 	// Detect fraudulent intervals using the new detectCreditCardFraud function
-	fraudIntervals := detectCreditCardFraud(events, request.Window)
+	fraudIntervals := detectCreditCardFraud(events, window)
 	
 	result := &CreditCardFraudResult{
 		CustomerID:      request.CustomerID,
@@ -109,7 +111,13 @@ func ProcessMultiCustomerFraudWorkflow(ctx workflow.Context, requests []CreditCa
 		customerIDs = append(customerIDs, customerID)
 		
 		childOptions := workflow.ChildWorkflowOptions{
-			WorkflowID: GenerateCreditCardFraudWorkflowID(customerID),
+			WorkflowID:            GenerateCreditCardFraudWorkflowID(customerID),
+			WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
+			RetryPolicy: &temporal.RetryPolicy{
+				MaximumAttempts: 3,
+				InitialInterval: time.Second,
+				MaximumInterval: time.Minute,
+			},
 		}
 		ctx := workflow.WithChildOptions(ctx, childOptions)
 		
