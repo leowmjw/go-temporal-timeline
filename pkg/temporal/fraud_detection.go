@@ -11,18 +11,22 @@ import (
 
 // FraudDetectionConfig holds configuration for fraud detection
 type FraudDetectionConfig struct {
+	MinDistanceKm   float64 // Minimum distance threshold - skip checks below this (e.g., 500km)
 	WalkingSpeedKmH float64 // Maximum walking speed in km/h
 	DrivingSpeedKmH float64 // Maximum driving speed in km/h  
 	FlyingSpeedKmH  float64 // Maximum flying speed in km/h
-	SpeedBuffer     float64 // Buffer factor (e.g., 1.2 = 20% over theoretical max)
+	SpeedBuffer     float64 // Buffer factor (e.g., 1.1 = 10% over theoretical max)
+	MinOverlaps     int     // Minimum number of overlaps required to flag fraud
 }
 
-// DefaultFraudDetectionConfig provides sensible defaults for fraud detection
+// DefaultFraudDetectionConfig provides tuned defaults for realistic fraud detection
 var DefaultFraudDetectionConfig = FraudDetectionConfig{
+	MinDistanceKm:   500.0, // Only check trips >= 500km to avoid urban false positives
 	WalkingSpeedKmH: 5.0,
-	DrivingSpeedKmH: 100.0,
-	FlyingSpeedKmH:  800.0,
-	SpeedBuffer:     1.2, // 20% buffer
+	DrivingSpeedKmH: 160.0, // Higher limit for highways/trains
+	FlyingSpeedKmH:  950.0, // Higher limit for domestic flights
+	SpeedBuffer:     1.1,   // 10% buffer (reduced from 20%)
+	MinOverlaps:     2,     // Require at least 2 independent overlaps
 }
 
 // FraudLocation represents a transaction location with coordinates
@@ -83,6 +87,11 @@ func isPossibleFraudTravelWithConfig(loc1, loc2 FraudLocation, timeframe time.Du
 	// Calculate distance
 	distance := calculateFraudDistance(loc1.Lat, loc1.Lng, loc2.Lat, loc2.Lng)
 	
+	// Skip fraud checks for short distances (urban areas)
+	if distance < config.MinDistanceKm {
+		return true // Assume legitimate for short distances
+	}
+	
 	// Calculate required speed in km/h
 	hours := timeframe.Hours()
 	if hours == 0 {
@@ -96,6 +105,11 @@ func isPossibleFraudTravelWithConfig(loc1, loc2 FraudLocation, timeframe time.Du
 
 // detectCreditCardFraud detects impossible travel patterns using only existing operators
 func detectCreditCardFraud(events timeline.EventTimeline, window time.Duration) timeline.BoolTimeline {
+	return detectCreditCardFraudWithConfig(events, window, DefaultFraudDetectionConfig)
+}
+
+// detectCreditCardFraudWithConfig detects impossible travel patterns using custom configuration
+func detectCreditCardFraudWithConfig(events timeline.EventTimeline, window time.Duration, config FraudDetectionConfig) timeline.BoolTimeline {
 	if len(events) < 2 {
 		return timeline.BoolTimeline{}
 	}
@@ -139,7 +153,7 @@ func detectCreditCardFraud(events timeline.EventTimeline, window time.Duration) 
 						loc1 := normalizeFraudLocation(ev1.Value)
 						loc2 := normalizeFraudLocation(ev2.Value)
 						
-						if !isPossibleFraudTravel(loc1, loc2, timeDiff) {
+						if !isPossibleFraudTravelWithConfig(loc1, loc2, timeDiff, config) {
 							suspiciousPairs = append(suspiciousPairs, locationPair{loc1Key, loc2Key})
 							// Once we find one impossible travel, we don't need to check more for this pair
 							goto nextPair
@@ -189,7 +203,8 @@ func detectCreditCardFraud(events timeline.EventTimeline, window time.Duration) 
 		}
 	}
 	
-	if len(allFraudTimelines) == 0 {
+	// Require minimum number of overlaps to flag fraud (reduces false positives)
+	if len(allFraudTimelines) < config.MinOverlaps {
 		return timeline.BoolTimeline{}
 	}
 	

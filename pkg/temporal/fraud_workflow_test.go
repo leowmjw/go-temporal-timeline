@@ -86,9 +86,11 @@ func TestCreditCardFraudWorkflow(t *testing.T) {
 		env.RegisterWorkflow(CreditCardFraudWorkflow)
 
 		// Create events for a customer with fraudulent transactions
+		// NOTE: Need 3 events to create 3 location pairs = 3 overlaps (exceeds MinOverlaps=2 requirement)
 		events := timeline.EventTimeline{
-			createTestEvent(baseTime, "New York", "NY", 40.7128, -74.0060, "in-store", "customer2"),
-			createTestEvent(baseTime.Add(5*time.Minute), "San Francisco", "CA", 37.7749, -122.4194, "in-store", "customer2"),
+			createTestEvent(baseTime, "New York", "NY", 40.7128, -74.0060, "in-store", "customer2"),       // Event 1
+			createTestEvent(baseTime.Add(5*time.Minute), "San Francisco", "CA", 37.7749, -122.4194, "in-store", "customer2"), // Event 2  
+			createTestEvent(baseTime.Add(8*time.Minute), "Los Angeles", "CA", 34.0522, -118.2437, "in-store", "customer2"),   // Event 3
 		}
 
 		request := CreditCardFraudRequest{

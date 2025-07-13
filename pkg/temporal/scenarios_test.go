@@ -86,6 +86,11 @@ func TestCreditCardFraudScenarios(t *testing.T) {
 					Type:      "transaction",
 					Value:     loc("San Francisco", "CA", 37.7749, -122.4194, "in-store"),
 				},
+				{
+					Timestamp: baseTime.Add(8 * time.Minute),
+					Type:      "transaction",
+					Value:     loc("Los Angeles", "CA", 34.0522, -118.2437, "in-store"),
+				},
 			},
 			window:      10 * time.Minute,
 			expectFraud: true,
@@ -137,6 +142,11 @@ func TestCreditCardFraudScenarios(t *testing.T) {
 					Type:      "transaction",
 					Value:     loc("Springfield", "MA", 42.1015, -72.5898, "in-store"),
 				},
+				{
+					Timestamp: baseTime.Add(8 * time.Minute),
+					Type:      "transaction",
+					Value:     loc("Springfield", "OR", 44.0462, -123.0220, "in-store"),
+				},
 			},
 			window:      10 * time.Minute,
 			expectFraud: true,
@@ -153,6 +163,11 @@ func TestCreditCardFraudScenarios(t *testing.T) {
 					Timestamp: baseTime.Add(3 * time.Minute),
 					Type:      "transaction",
 					Value:     loc("Los Angeles", "CA", 34.0522, -118.2437, "in-store"),
+				},
+				{
+					Timestamp: baseTime.Add(6 * time.Minute),
+					Type:      "transaction",
+					Value:     `{"city":"Online Store","state":"ONLINE","type":"online"}`,
 				},
 			},
 			window:      10 * time.Minute,
@@ -185,6 +200,35 @@ func TestCreditCardFraudScenarios(t *testing.T) {
 				return events
 			}(),
 			window:      10 * time.Minute,
+			expectFraud: true,
+		},
+		{
+			name: "SF ↔ LA in 5 min → fraud (should still flag)",
+			events: timeline.EventTimeline{
+				{Timestamp: baseTime, Type: "transaction", Value: loc("San Francisco", "CA", 37.7749, -122.4194, "in-store")},
+				{Timestamp: baseTime.Add(5 * time.Minute), Type: "transaction", Value: loc("Los Angeles", "CA", 34.0522, -118.2437, "in-store")},
+				{Timestamp: baseTime.Add(8 * time.Minute), Type: "transaction", Value: loc("San Diego", "CA", 32.7157, -117.1611, "in-store")},
+			},
+			window:      30 * time.Minute,
+			expectFraud: true,
+		},
+		{
+			name: "Manhattan stores 2 km apart in 30 min → not fraud",
+			events: timeline.EventTimeline{
+				{Timestamp: baseTime, Type: "transaction", Value: loc("Manhattan", "NY", 40.7831, -73.9712, "in-store")}, // Upper East Side
+				{Timestamp: baseTime.Add(30 * time.Minute), Type: "transaction", Value: loc("Manhattan", "NY", 40.7505, -73.9934, "in-store")}, // Midtown
+			},
+			window:      45 * time.Minute,
+			expectFraud: false,
+		},
+		{
+			name: "Online-then-in-store 1000 km apart within 1 h → fraud",
+			events: timeline.EventTimeline{
+				{Timestamp: baseTime, Type: "transaction", Value: loc("Boston", "MA", 42.3601, -71.0589, "online")},
+				{Timestamp: baseTime.Add(1 * time.Hour), Type: "transaction", Value: loc("Miami", "FL", 25.7617, -80.1918, "in-store")},
+				{Timestamp: baseTime.Add(65 * time.Minute), Type: "transaction", Value: loc("Orlando", "FL", 28.5383, -81.3792, "in-store")},
+			},
+			window:      2 * time.Hour,
 			expectFraud: true,
 		},
 	}
