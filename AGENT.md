@@ -86,6 +86,10 @@ go test ./pkg/temporal/ -short -v -run TestIntegrationCreditCardFraudWorkflow
 2. The helper functions in `fraud_detection.go` should be reviewed for DRY violations
 3. E2E test fraud detection rate is currently 100% due to aggressive fraud logic - should be tuned to realistic 3% rate
 
+## Additional Documentation
+
+*   **Badging Scenarios (`pkg/timeline/SCENARIOS.md`)**: This document details five unique badging scenarios, complete with pseudo-code, demonstrating how existing Timeline Operators can be leveraged to implement various user engagement badges. This serves as a guide for future implementation.
+
 ## Timeline Analytics Platform: Implementation Brief for Handoff
 
 ### Purpose

@@ -54,6 +54,8 @@ type Activities interface {
 	ExecuteOperatorActivity(ctx context.Context, events [][]byte, operation QueryOperation) (interface{}, error)
 	QueryVictoriaLogsActivity(ctx context.Context, filters map[string]interface{}, timeRange *TimeRange) ([]string, error)
 	ReadIcebergActivity(ctx context.Context, timelineID string, timeRange *TimeRange, eventPointers []string) ([][]byte, error)
+	// Badge evaluation activities
+	EvaluateBadgeActivity(ctx context.Context, events [][]byte, operations []QueryOperation, badgeType, userID string) (*BadgeResult, error)
 }
 
 // ActivitiesImpl implements the Activities interface
@@ -884,4 +886,130 @@ func assembleChunkResults(chunkResults []*ChunkResult, operations []QueryOperati
 			"concurrentMode":   true,
 		},
 	}, nil
+}
+
+// EvaluateBadgeActivity evaluates badge conditions using timeline operators
+func (a *ActivitiesImpl) EvaluateBadgeActivity(ctx context.Context, events [][]byte, operations []QueryOperation, badgeType, userID string) (*BadgeResult, error) {
+	a.logger.Info("Evaluating badge", "badgeType", badgeType, "userID", userID, "events", len(events))
+
+	// First process events through timeline operations
+	queryResult, err := a.ProcessEventsActivity(ctx, events, operations)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process badge events: %w", err)
+	}
+
+	result := &BadgeResult{
+		UserID:    userID,
+		BadgeType: badgeType,
+		Earned:    false,
+		Progress:  0.0,
+		Metadata:  make(map[string]interface{}),
+	}
+
+	// Badge-specific evaluation logic
+	switch badgeType {
+	case StreakMaintainerBadge:
+		result.Earned, result.Progress = a.evaluateStreakMaintainer(queryResult)
+	case DailyEngagementBadge:
+		result.Earned, result.Progress = a.evaluateDailyEngagement(queryResult)
+	default:
+		return nil, fmt.Errorf("unknown badge type: %s", badgeType)
+	}
+
+	if result.Earned {
+		now := time.Now()
+		result.EarnedAt = &now
+	}
+
+	// Add metadata from query result
+	if queryResult.Metadata != nil {
+		for k, v := range queryResult.Metadata {
+			result.Metadata[k] = v
+		}
+	}
+
+	a.logger.Info("Badge evaluation completed", "badgeType", badgeType, "earned", result.Earned, "progress", result.Progress)
+	return result, nil
+}
+
+// evaluateStreakMaintainer evaluates the streak maintainer badge
+func (a *ActivitiesImpl) evaluateStreakMaintainer(queryResult *QueryResult) (bool, float64) {
+	// The result should be a duration in seconds from DurationWhere operation
+	if queryResult.Result == nil {
+		return false, 0.0
+	}
+
+	// For streak maintainer, we need a duration >= 14 days (2 weeks)
+	requiredDurationSeconds := float64(14 * 24 * 60 * 60) // 14 days in seconds
+
+	switch result := queryResult.Result.(type) {
+	case float64:
+		// Result is duration in seconds from DurationWhere
+		progress := result / requiredDurationSeconds
+		if progress > 1.0 {
+			progress = 1.0
+		}
+		
+		return result >= requiredDurationSeconds, progress
+		
+	case timeline.NumericTimeline:
+		// Find the maximum continuous duration in "on_time" state
+		var maxDuration time.Duration
+		for _, interval := range result {
+			duration := interval.End.Sub(interval.Start)
+			if duration > maxDuration {
+				maxDuration = duration
+			}
+		}
+		
+		progress := float64(maxDuration.Seconds()) / requiredDurationSeconds
+		if progress > 1.0 {
+			progress = 1.0
+		}
+		
+		return maxDuration.Seconds() >= requiredDurationSeconds, progress
+	}
+
+	return false, 0.0
+}
+
+// evaluateDailyEngagement evaluates the daily engagement badge
+func (a *ActivitiesImpl) evaluateDailyEngagement(queryResult *QueryResult) (bool, float64) {
+	// The result should be a duration in seconds from DurationWhere operation
+	if queryResult.Result == nil {
+		return false, 0.0
+	}
+
+	// For daily engagement, we need a duration >= 7 days
+	requiredDurationSeconds := float64(7 * 24 * 60 * 60) // 7 days in seconds
+
+	switch result := queryResult.Result.(type) {
+	case float64:
+		// Result is duration in seconds from DurationWhere
+		progress := result / requiredDurationSeconds
+		if progress > 1.0 {
+			progress = 1.0
+		}
+		
+		return result >= requiredDurationSeconds, progress
+		
+	case timeline.NumericTimeline:
+		// Find the maximum continuous duration in "active" state
+		var maxDuration time.Duration
+		for _, interval := range result {
+			duration := interval.End.Sub(interval.Start)
+			if duration > maxDuration {
+				maxDuration = duration
+			}
+		}
+		
+		progress := float64(maxDuration.Seconds()) / requiredDurationSeconds
+		if progress > 1.0 {
+			progress = 1.0
+		}
+		
+		return maxDuration.Seconds() >= requiredDurationSeconds, progress
+	}
+
+	return false, 0.0
 }
