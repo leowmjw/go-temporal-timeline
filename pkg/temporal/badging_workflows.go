@@ -82,9 +82,14 @@ func StreakMaintainerWorkflow(ctx workflow.Context, request BadgeRequest) (*Badg
 			},
 		},
 		{
-			ID:     "on_time_duration",
-			Op:     "DurationWhere",
+			ID:     "on_time_bool_timeline",
+			Op:     "AND",
 			ConditionAll: []string{"payment_successful_exists", "payment_due_not_exists"},
+		},
+		{
+			ID:     "longest_streak",
+			Op:     "LongestConsecutiveTrueDuration",
+			Source: "on_time_bool_timeline",
 		},
 	}
 
@@ -144,9 +149,14 @@ func DailyEngagementWorkflow(ctx workflow.Context, request BadgeRequest) (*Badge
 			Window: "24h",
 		},
 		{
-			ID:     "daily_engagement_duration",
-			Op:     "DurationWhere",
+			ID:     "daily_activity_bool_timeline",
+			Op:     "OR",
 			ConditionAny: []string{"app_open_within_day", "user_interaction_within_day", "post_created_within_day"},
+		},
+		{
+			ID:     "longest_engagement_streak",
+			Op:     "LongestConsecutiveTrueDuration",
+			Source: "daily_activity_bool_timeline",
 		},
 	}
 

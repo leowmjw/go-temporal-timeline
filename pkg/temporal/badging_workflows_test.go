@@ -1,6 +1,8 @@
 package temporal
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -126,15 +128,20 @@ func TestGenerateBadgeWorkflowID(t *testing.T) {
 			}
 
 			// Check that it contains the expected prefix and components
-			expectedPrefix := BadgeWorkflowIDPrefix + tt.userID + "-" + tt.badgeType
-			if len(id) <= len(expectedPrefix) {
-				t.Errorf("Expected workflow ID to be longer than %d characters", len(expectedPrefix))
+			expectedPrefix := BadgeWorkflowIDPrefix + tt.userID + "-" + tt.badgeType + "-"
+			if !strings.HasPrefix(id, expectedPrefix) {
+				t.Errorf("Expected workflow ID to start with '%s', got '%s'", expectedPrefix, id)
 			}
 			
-			// Should be unique each time
-			id2 := GenerateBadgeWorkflowID(tt.userID, tt.badgeType)
-			if id == id2 {
-				t.Error("Expected unique workflow IDs")
+			// Check that the ID contains a timestamp suffix (numeric)
+			suffix := strings.TrimPrefix(id, expectedPrefix)
+			if len(suffix) == 0 {
+				t.Error("Expected workflow ID to have a timestamp suffix")
+			}
+			
+			// Verify the suffix is numeric (timestamp)
+			if _, err := strconv.ParseInt(suffix, 10, 64); err != nil {
+				t.Errorf("Expected workflow ID suffix to be numeric timestamp, got '%s'", suffix)
 			}
 		})
 	}

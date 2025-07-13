@@ -322,3 +322,29 @@ func andTwoTimelines(a, b BoolTimeline) BoolTimeline {
 
 	return mergeBoolIntervals(result)
 }
+
+// LongestConsecutiveTrueDuration calculates the longest continuous duration where a boolean timeline maintains a TRUE state
+func LongestConsecutiveTrueDuration(timeline BoolTimeline, minDuration ...time.Duration) float64 {
+	if len(timeline) == 0 {
+		return 0.0
+	}
+
+	var minDur time.Duration
+	if len(minDuration) > 0 {
+		minDur = minDuration[0]
+	}
+
+	var maxDuration time.Duration
+	
+	for _, interval := range timeline {
+		if interval.Value {
+			duration := interval.End.Sub(interval.Start)
+			// Only consider durations that meet the minimum requirement
+			if duration >= minDur && duration > maxDuration {
+				maxDuration = duration
+			}
+		}
+	}
+
+	return maxDuration.Seconds()
+}

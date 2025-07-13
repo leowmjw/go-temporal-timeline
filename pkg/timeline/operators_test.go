@@ -535,3 +535,106 @@ func TestDurationInCurState_CreditCardExample(t *testing.T) {
 		t.Errorf("expected 1 suspicious state (duration < 10 min), got %d", len(suspiciousStates))
 	}
 }
+
+func TestLongestConsecutiveTrueDuration(t *testing.T) {
+	tests := []struct {
+		name            string
+		timeline        BoolTimeline
+		minDuration     *time.Duration
+		expectedSeconds float64
+		description     string
+	}{
+		{
+			name: "Basic True Streak - 24 hours",
+			timeline: BoolTimeline{
+				{Value: true, Start: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC)},
+			},
+			expectedSeconds: 86400.0, // 24 hours = 86400 seconds
+			description:     "Returns seconds in a 24-hour period",
+		},
+		{
+			name: "Multiple True Periods - different durations",
+			timeline: BoolTimeline{
+				{Value: true, Start: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 2, 0, 0, 0, time.UTC)}, // 2h
+				{Value: false, Start: time.Date(2025, 1, 1, 2, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 3, 0, 0, 0, time.UTC)}, // 1h gap
+				{Value: true, Start: time.Date(2025, 1, 1, 3, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 6, 0, 0, 0, time.UTC)}, // 3h
+			},
+			expectedSeconds: 10800.0, // 3 hours = 10800 seconds (longest)
+			description:     "Should return longest streak (3h = 10800s)",
+		},
+		{
+			name: "No True Values",
+			timeline: BoolTimeline{
+				{Value: false, Start: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 1, 0, 0, 0, time.UTC)},
+				{Value: false, Start: time.Date(2025, 1, 1, 1, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 2, 0, 0, 0, time.UTC)},
+			},
+			expectedSeconds: 0.0,
+			description:     "Should return zero when no TRUE values exist",
+		},
+		{
+			name: "Minimum Duration Filter",
+			timeline: BoolTimeline{
+				{Value: true, Start: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 1, 0, 0, 0, time.UTC)}, // 1h
+				{Value: false, Start: time.Date(2025, 1, 1, 1, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 2, 0, 0, 0, time.UTC)}, // gap
+				{Value: true, Start: time.Date(2025, 1, 1, 2, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 5, 0, 0, 0, time.UTC)}, // 3h
+				{Value: false, Start: time.Date(2025, 1, 1, 5, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 6, 0, 0, 0, time.UTC)}, // gap
+				{Value: true, Start: time.Date(2025, 1, 1, 6, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 8, 0, 0, 0, time.UTC)}, // 2h
+			},
+			minDuration:     &[]time.Duration{2*time.Hour + 30*time.Minute}[0], // 2h30m minimum
+			expectedSeconds: 10800.0, // Only 3h period exceeds minimum
+			description:     "Only 3h period exceeds minimum",
+		},
+		{
+			name: "Short Interruptions",
+			timeline: BoolTimeline{
+				{Value: true, Start: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 2, 0, 0, 0, time.UTC)},   // 2h
+				{Value: false, Start: time.Date(2025, 1, 1, 2, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 2, 5, 0, 0, time.UTC)}, // 5min gap
+				{Value: true, Start: time.Date(2025, 1, 1, 2, 5, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 4, 0, 0, 0, time.UTC)},   // 1h55m
+				{Value: false, Start: time.Date(2025, 1, 1, 4, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 4, 5, 0, 0, time.UTC)}, // 5min gap
+				{Value: true, Start: time.Date(2025, 1, 1, 4, 5, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 5, 0, 0, 0, time.UTC)},   // 55m
+			},
+			expectedSeconds: 7200.0, // First 2h segment is longest uninterrupted
+			description:     "Tests resilience to short interruptions",
+		},
+		{
+			name:            "Empty Timeline",
+			timeline:        BoolTimeline{},
+			expectedSeconds: 0.0,
+			description:     "Should gracefully handle empty timelines",
+		},
+		{
+			name: "Duration with Days",
+			timeline: BoolTimeline{
+				{Value: true, Start: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 3, 0, 0, 0, 0, time.UTC)}, // 2 days
+			},
+			minDuration:     &[]time.Duration{24 * time.Hour}[0], // 1 day minimum
+			expectedSeconds: 172800.0, // 2 days = 172800 seconds
+			description:     "Should correctly parse and handle day units",
+		},
+		{
+			name: "Multiple consecutive periods - select longest",
+			timeline: BoolTimeline{
+				{Value: true, Start: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 1, 0, 0, 0, time.UTC)}, // 1h
+				{Value: true, Start: time.Date(2025, 1, 1, 2, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 6, 0, 0, 0, time.UTC)}, // 4h
+				{Value: true, Start: time.Date(2025, 1, 1, 7, 0, 0, 0, time.UTC), End: time.Date(2025, 1, 1, 9, 0, 0, 0, time.UTC)}, // 2h
+			},
+			expectedSeconds: 14400.0, // 4h = 14400 seconds (longest)
+			description:     "Should select the longest of multiple true periods",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var result float64
+			if tt.minDuration != nil {
+				result = LongestConsecutiveTrueDuration(tt.timeline, *tt.minDuration)
+			} else {
+				result = LongestConsecutiveTrueDuration(tt.timeline)
+			}
+
+			if result != tt.expectedSeconds {
+				t.Errorf("Expected %f seconds, got %f seconds. %s", tt.expectedSeconds, result, tt.description)
+			}
+		})
+	}
+}

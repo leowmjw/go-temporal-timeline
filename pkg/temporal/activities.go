@@ -592,6 +592,39 @@ func (qp *QueryProcessor) executeOperation(events timeline.EventTimeline, op Que
 		}
 		return timeline.OR(timelines...), nil
 
+	case "LongestConsecutiveTrueDuration":
+		// Get source timeline from previous results
+		if op.Source == "" {
+			return nil, fmt.Errorf("LongestConsecutiveTrueDuration operation requires 'source' parameter")
+		}
+		
+		sourceResult, exists := previousResults[op.Source]
+		if !exists {
+			return nil, fmt.Errorf("source timeline '%s' not found", op.Source)
+		}
+		
+		boolTimeline, ok := sourceResult.(timeline.BoolTimeline)
+		if !ok {
+			return nil, fmt.Errorf("LongestConsecutiveTrueDuration operation requires BoolTimeline input")
+		}
+		
+		// Parse optional minimum duration parameter
+		var minDuration time.Duration
+		if durationStr, exists := op.Params["duration"]; exists {
+			if str, ok := durationStr.(string); ok {
+				var err error
+				minDuration, err = time.ParseDuration(str)
+				if err != nil {
+					return nil, fmt.Errorf("invalid duration parameter: %w", err)
+				}
+			}
+		}
+		
+		if minDuration > 0 {
+			return timeline.LongestConsecutiveTrueDuration(boolTimeline, minDuration), nil
+		}
+		return timeline.LongestConsecutiveTrueDuration(boolTimeline), nil
+
 	default:
 		return nil, fmt.Errorf("unsupported operation: %s", op.Op)
 	}
@@ -934,7 +967,7 @@ func (a *ActivitiesImpl) EvaluateBadgeActivity(ctx context.Context, events [][]b
 
 // evaluateStreakMaintainer evaluates the streak maintainer badge
 func (a *ActivitiesImpl) evaluateStreakMaintainer(queryResult *QueryResult) (bool, float64) {
-	// The result should be a duration in seconds from DurationWhere operation
+	// The result should be a duration in seconds from LongestConsecutiveTrueDuration operation
 	if queryResult.Result == nil {
 		return false, 0.0
 	}
@@ -944,7 +977,7 @@ func (a *ActivitiesImpl) evaluateStreakMaintainer(queryResult *QueryResult) (boo
 
 	switch result := queryResult.Result.(type) {
 	case float64:
-		// Result is duration in seconds from DurationWhere
+		// Result is the longest consecutive duration in seconds from LongestConsecutiveTrueDuration
 		progress := result / requiredDurationSeconds
 		if progress > 1.0 {
 			progress = 1.0
@@ -953,7 +986,7 @@ func (a *ActivitiesImpl) evaluateStreakMaintainer(queryResult *QueryResult) (boo
 		return result >= requiredDurationSeconds, progress
 		
 	case timeline.NumericTimeline:
-		// Find the maximum continuous duration in "on_time" state
+		// Shouldn't happen with LongestConsecutiveTrueDuration, but handle gracefully
 		var maxDuration time.Duration
 		for _, interval := range result {
 			duration := interval.End.Sub(interval.Start)
@@ -975,7 +1008,7 @@ func (a *ActivitiesImpl) evaluateStreakMaintainer(queryResult *QueryResult) (boo
 
 // evaluateDailyEngagement evaluates the daily engagement badge
 func (a *ActivitiesImpl) evaluateDailyEngagement(queryResult *QueryResult) (bool, float64) {
-	// The result should be a duration in seconds from DurationWhere operation
+	// The result should be a duration in seconds from LongestConsecutiveTrueDuration operation
 	if queryResult.Result == nil {
 		return false, 0.0
 	}
@@ -985,7 +1018,7 @@ func (a *ActivitiesImpl) evaluateDailyEngagement(queryResult *QueryResult) (bool
 
 	switch result := queryResult.Result.(type) {
 	case float64:
-		// Result is duration in seconds from DurationWhere
+		// Result is the longest consecutive duration in seconds from LongestConsecutiveTrueDuration
 		progress := result / requiredDurationSeconds
 		if progress > 1.0 {
 			progress = 1.0
@@ -994,7 +1027,7 @@ func (a *ActivitiesImpl) evaluateDailyEngagement(queryResult *QueryResult) (bool
 		return result >= requiredDurationSeconds, progress
 		
 	case timeline.NumericTimeline:
-		// Find the maximum continuous duration in "active" state
+		// Shouldn't happen with LongestConsecutiveTrueDuration, but handle gracefully
 		var maxDuration time.Duration
 		for _, interval := range result {
 			duration := interval.End.Sub(interval.Start)
