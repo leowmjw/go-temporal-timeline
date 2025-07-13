@@ -9,6 +9,8 @@ import (
 )
 
 const (
+	DefaultChunkSize = 10000 // events per chunk for concurrent processing
+
 	// Workflow IDs
 	IngestionWorkflowIDPrefix = "timeline-"
 	QueryWorkflowIDPrefix     = "query-"
@@ -29,6 +31,16 @@ const (
 	// Default values
 	DefaultContinueAsNewThreshold = 1000 // events before ContinueAsNew
 )
+
+// EventSignal represents a signal containing events to be processed
+// EventChunk represents a chunk of events for concurrent processing.
+// It includes metadata about the chunk's position in the overall job.
+type EventChunk struct {
+	Events      [][]byte `json:"events"`
+	ChunkIndex  int      `json:"chunkIndex"`
+	TotalChunks int      `json:"totalChunks"`
+	ID          int      `json:"id"`
+}
 
 // EventSignal represents a signal containing events to be processed
 type EventSignal struct {
@@ -69,6 +81,7 @@ type QueryResult struct {
 	Unit       string                 `json:"unit,omitempty"`
 	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 	S3Location string                 `json:"s3_location,omitempty"` // For large results
+	Error      error                  `json:"-"`                     // Error is not marshaled
 }
 
 // ReplayRequest represents a replay/backfill request
@@ -286,6 +299,145 @@ func ReplayWorkflow(ctx workflow.Context, request ReplayRequest) (*QueryResult, 
 
 	logger.Info("Replay completed", "result", result.Result)
 	return result, nil
+}
+
+// ProcessEventsWithMicroWorkflows processes events using micro-workflow architecture (Plan 1)
+func ProcessEventsConcurrently(ctx workflow.Context, events [][]byte, operations []QueryOperation) (*QueryResult, error) {
+	logger := workflow.GetLogger(ctx)
+	logger.Info("Starting concurrent event processing", "totalEvents", len(events))
+
+	ao := workflow.ActivityOptions{
+		StartToCloseTimeout: 5 * time.Minute,
+		HeartbeatTimeout:    30 * time.Second,
+		RetryPolicy: &temporal.RetryPolicy{
+			MaximumAttempts: 3,
+		},
+	}
+	ctx = workflow.WithActivityOptions(ctx, ao)
+
+	eventChunks := createEventChunks(events, DefaultChunkSize)
+	logger.Info("Created event chunks", "chunkCount", len(eventChunks))
+
+	var chunkResultFutures []workflow.Future
+	for _, chunk := range eventChunks {
+		// Execute activity for each chunk and store the future
+		future := workflow.ExecuteActivity(ctx, ProcessEventsChunkActivityName, chunk, operations)
+		chunkResultFutures = append(chunkResultFutures, future)
+	}
+
+	// Collect results from all chunk processing activities
+	var chunkResults []*QueryResult
+	for _, future := range chunkResultFutures {
+		var chunkResult QueryResult
+		if err := future.Get(ctx, &chunkResult); err != nil {
+			// Even if a chunk fails, we collect its result to decide on the final outcome
+			// The error will be inside the QueryResult struct
+			logger.Error("A chunk processing activity failed", "error", err)
+		}
+		chunkResults = append(chunkResults, &chunkResult)
+	}
+
+	// Assemble the final result from all chunk results
+	finalResult, err := assembleChunkResults(chunkResults, operations)
+	if err != nil {
+		logger.Error("Failed to assemble final result from chunks", "error", err)
+		return nil, err
+	}
+
+	logger.Info("Assembled final result from chunks successfully")
+	return finalResult, nil
+}
+
+// createEventChunks splits a slice of events into smaller EventChunk structs.
+func createEventChunks(events [][]byte, chunkSize int) []EventChunk {
+	if len(events) == 0 {
+		return nil
+	}
+
+	var chunks []EventChunk
+	totalChunks := (len(events) + chunkSize - 1) / chunkSize // Ceiling division
+	for i := 0; i < len(events); i += chunkSize {
+		end := i + chunkSize
+		if end > len(events) {
+			end = len(events)
+		}
+		chunkIndex := i / chunkSize
+		chunks = append(chunks, EventChunk{
+			Events:      events[i:end],
+			ChunkIndex:  chunkIndex,
+			TotalChunks: totalChunks,
+			ID:          chunkIndex,
+		})
+	}
+	return chunks
+}
+
+// assembleChunkResults combines results from multiple chunks into a single QueryResult.
+func assembleChunkResults(chunkResults []*QueryResult, operations []QueryOperation) (*QueryResult, error) {
+	successfulChunks := 0
+	failedChunks := 0
+	totalEvents := 0
+
+	// For now, we assume a single operation for simplicity of aggregation.
+	if len(operations) == 0 {
+		return nil, fmt.Errorf("no operations provided for aggregation")
+	}
+	op := operations[0]
+
+	var aggregatedResult interface{}
+
+	// Initialize aggregatedResult based on operation type
+	switch op.Op {
+	case "DurationWhere", "LongestConsecutiveTrueDuration":
+		aggregatedResult = 0.0
+	case "HasExisted", "HasExistedWithin":
+		aggregatedResult = false
+	default:
+		// Default to returning the first successful result if aggregation logic is not defined.
+	}
+
+	for _, res := range chunkResults {
+		if res.Error != nil {
+			failedChunks++
+			continue
+		}
+		successfulChunks++
+		if count, ok := res.Metadata["eventCount"].(int); ok {
+			totalEvents += count
+		}
+
+		switch op.Op {
+		case "DurationWhere", "LongestConsecutiveTrueDuration":
+			if val, ok := res.Result.(float64); ok {
+				aggregatedResult = aggregatedResult.(float64) + val
+			}
+		case "HasExisted", "HasExistedWithin":
+			if val, ok := res.Result.(bool); ok {
+				aggregatedResult = aggregatedResult.(bool) || val
+			}
+		default:
+			// If no specific aggregation, just keep the first result.
+			if successfulChunks == 1 {
+				aggregatedResult = res.Result
+			}
+		}
+	}
+
+	if successfulChunks == 0 {
+		return nil, fmt.Errorf("all chunks failed processing")
+	}
+
+	finalResult := &QueryResult{
+		Result: aggregatedResult,
+		Metadata: map[string]interface{}{
+			"totalEvents":      totalEvents,
+			"successfulChunks": successfulChunks,
+			"failedChunks":     failedChunks,
+			"concurrentMode":   true,
+		},
+	}
+
+	return finalResult, nil
 }
 
 // ProcessEventsWithMicroWorkflows processes events using micro-workflow architecture (Plan 1)

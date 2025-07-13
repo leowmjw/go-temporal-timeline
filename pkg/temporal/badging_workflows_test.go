@@ -42,7 +42,7 @@ func TestBadgeResult_Structure(t *testing.T) {
 	result := BadgeResult{
 		UserID:    "user-123",
 		BadgeType: StreakMaintainerBadge,
-		Earned:    true,
+		Achieved:  true,
 		Progress:  1.0,
 		EarnedAt:  &earnedAt,
 		Metadata: map[string]interface{}{
@@ -58,7 +58,7 @@ func TestBadgeResult_Structure(t *testing.T) {
 		t.Errorf("Expected badge type '%s', got '%s'", StreakMaintainerBadge, result.BadgeType)
 	}
 
-	if !result.Earned {
+	if !result.Achieved {
 		t.Error("Expected badge to be earned")
 	}
 

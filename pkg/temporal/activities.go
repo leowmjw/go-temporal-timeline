@@ -4,43 +4,28 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/leowmjw/go-temporal-timeline/pkg/timeline"
 	"go.temporal.io/sdk/activity"
-	"go.temporal.io/sdk/temporal"
-	"go.temporal.io/sdk/workflow"
 )
 
 // Constants for chunked processing
 const (
-	DefaultChunkSize     = 10000 // 10K events per chunk
-	MaxConcurrency       = 10    // Maximum concurrent activities
+	MaxConcurrency         = 10   // Maximum concurrent activities
 	ProgressReportInterval = 1000 // Report progress every 1K events
 )
 
-// EventChunk represents a chunk of events for processing
-type EventChunk struct {
-	ID     int       `json:"id"`
-	Events [][]byte  `json:"events"`
-	TotalChunks int  `json:"total_chunks"`
-	ChunkIndex  int  `json:"chunk_index"`
-}
 
-// ChunkResult represents the result of processing a chunk
-type ChunkResult struct {
-	ChunkID int                    `json:"chunk_id"`
-	Result  interface{}           `json:"result"`
-	Metadata map[string]interface{} `json:"metadata"`
-	Error   error                 `json:"error,omitempty"`
-}
 
 // ProgressInfo tracks processing progress
 type ProgressInfo struct {
-	TotalEvents    int `json:"total_events"`
+	TotalEvents     int `json:"total_events"`
 	ProcessedEvents int `json:"processed_events"`
 	CompletedChunks int `json:"completed_chunks"`
-	TotalChunks    int `json:"total_chunks"`
+	TotalChunks     int `json:"total_chunks"`
 }
 
 // Activities interface defines all the activities used by workflows
@@ -49,7 +34,7 @@ type Activities interface {
 	LoadEventsActivity(ctx context.Context, timelineID string, timeRange *TimeRange) ([][]byte, error)
 	ProcessEventsActivity(ctx context.Context, events [][]byte, operations []QueryOperation) (*QueryResult, error)
 	// New chunked processing activities
-	ProcessEventsChunkActivity(ctx context.Context, chunk EventChunk, operations []QueryOperation) (*ChunkResult, error)
+	ProcessEventsChunkActivity(ctx context.Context, chunk EventChunk, operations []QueryOperation) (*QueryResult, error)
 	// New micro-workflow activities
 	ExecuteOperatorActivity(ctx context.Context, events [][]byte, operation QueryOperation) (interface{}, error)
 	QueryVictoriaLogsActivity(ctx context.Context, filters map[string]interface{}, timeRange *TimeRange) ([]string, error)
@@ -155,7 +140,7 @@ func (a *ActivitiesImpl) ProcessEventsActivity(ctx context.Context, events [][]b
 }
 
 // ProcessEventsChunkActivity processes a chunk of events through timeline operations
-func (a *ActivitiesImpl) ProcessEventsChunkActivity(ctx context.Context, chunk EventChunk, operations []QueryOperation) (*ChunkResult, error) {
+func (a *ActivitiesImpl) ProcessEventsChunkActivity(ctx context.Context, chunk EventChunk, operations []QueryOperation) (*QueryResult, error) {
 	a.logger.Info("Processing event chunk", "chunkID", chunk.ID, "eventCount", len(chunk.Events), "operationCount", len(operations))
 
 	// Report progress via heartbeat
@@ -192,9 +177,8 @@ func (a *ActivitiesImpl) ProcessEventsChunkActivity(ctx context.Context, chunk E
 	result, err := processor.ProcessQuery(classifiedEvents, operations)
 	if err != nil {
 		a.logger.Error("Failed to process chunk", "error", err, "chunkID", chunk.ID)
-		return &ChunkResult{
-			ChunkID: chunk.ID,
-			Error:   fmt.Errorf("failed to process chunk %d: %w", chunk.ID, err),
+		return &QueryResult{
+			Error: err,
 		}, nil // Return nil error so workflow can handle chunk failures
 	}
 
@@ -203,20 +187,20 @@ func (a *ActivitiesImpl) ProcessEventsChunkActivity(ctx context.Context, chunk E
 	progress.CompletedChunks = chunk.ChunkIndex + 1
 	activity.RecordHeartbeat(ctx, progress)
 
-	chunkResult := &ChunkResult{
-		ChunkID: chunk.ID,
-		Result:  result.Result,
-		Metadata: map[string]interface{}{
-			"eventCount":       len(chunk.Events),
-			"classifiedCount":  len(classifiedEvents),
-			"operationCount":   len(operations),
-			"processedAt":      time.Now(),
-			"activityInfo":     info.ActivityID,
-		},
+	metadata := map[string]interface{}{
+		"eventCount":       len(chunk.Events),
+		"classifiedCount":  len(classifiedEvents),
+		"operationCount":   len(operations),
+		"processedAt":      time.Now(),
+		"activityInfo":     info.ActivityID,
+		"chunkIndex":       chunk.ChunkIndex,
 	}
 
 	a.logger.Info("Successfully processed chunk", "chunkID", chunk.ID, "result", result.Result)
-	return chunkResult, nil
+
+	// The result from ProcessQuery is already a QueryResult
+	result.Metadata = metadata
+	return result, nil
 }
 
 // ExecuteOperatorActivity executes a single timeline operator
@@ -310,26 +294,145 @@ func (a *ActivitiesImpl) ReadIcebergActivity(ctx context.Context, timelineID str
 		a.logger.Error("Failed to read from Iceberg", "error", err)
 		return nil, fmt.Errorf("failed to read from Iceberg: %w", err)
 	}
-
-	a.logger.Info("Successfully read from Iceberg", "timelineID", timelineID, "count", len(events))
 	return events, nil
 }
 
-// QueryProcessor handles the execution of timeline operations
-type QueryProcessor struct{}
+func (a *ActivitiesImpl) EvaluateBadgeActivity(ctx context.Context, events [][]byte, operations []QueryOperation, badgeType, userID string) (*BadgeResult, error) {
+	activity.GetLogger(ctx).Info("Evaluating badge", "badgeType", badgeType, "userID", userID, "eventCount", len(events))
 
-// NewQueryProcessor creates a new query processor
+	// Process events to get a query result
+	queryResult, err := a.ProcessEventsActivity(ctx, events, operations)
+	if err != nil {
+		return nil, fmt.Errorf("error processing events for badge evaluation: %w", err)
+	}
+
+	// Delegate to the appropriate evaluation method based on badge type
+	return a.evaluateBadge(ctx, badgeType, userID, queryResult)
+}
+
+// evaluateBadge is a helper function to route to the correct badge logic.
+func (a *ActivitiesImpl) evaluateBadge(ctx context.Context, badgeType string, userID string, queryResult *QueryResult) (*BadgeResult, error) {
+	switch badgeType {
+	case "streak_maintainer":
+		return a.evaluateStreakMaintainer(ctx, queryResult, badgeType, userID)
+	case "daily_engagement":
+		return a.evaluateDailyEngagement(ctx, queryResult, badgeType, userID)
+	default:
+		return nil, fmt.Errorf("unknown badge type: %s", badgeType)
+	}
+}
+
+// evaluateStreakMaintainer checks for the longest consecutive active duration.
+func (a *ActivitiesImpl) evaluateStreakMaintainer(ctx context.Context, queryResult *QueryResult, badgeType, userID string) (*BadgeResult, error) {
+	// Example: Award if the longest consecutive duration of 'active' events is >= 24 hours.
+	durationInSeconds, ok := queryResult.Result.(float64) // LongestConsecutiveTrueDuration returns duration in seconds.
+	if !ok {
+		return &BadgeResult{Achieved: false, BadgeType: badgeType, UserID: userID}, 
+			fmt.Errorf("unexpected result type for streak_maintainer: got %T", queryResult.Result)
+	}
+
+	requiredDurationSeconds := 24.0 * 3600.0 // 24 hours
+
+	badge := Badge{
+		ID:          "streak_maintainer_1",
+		Name:        "24-Hour Streak Maintainer",
+		Description: "Maintain an active status for 24 consecutive hours.",
+		Value:       24,
+		Unit:        "hours",
+	}
+
+	if durationInSeconds >= requiredDurationSeconds {
+		now := time.Now()
+		return &BadgeResult{
+			Achieved:  true, 
+			Badge:     &badge, 
+			EarnedAt:  &now,
+			BadgeType: badgeType,
+			UserID:    userID,
+			Progress:  1.0,
+		}, nil
+	}
+
+	// Calculate progress as a ratio of achieved duration to required duration
+	progress := durationInSeconds / requiredDurationSeconds
+	if progress > 1.0 {
+		progress = 1.0
+	}
+
+	return &BadgeResult{
+		Achieved:  false, 
+		Badge:     &badge,
+		BadgeType: badgeType,
+		UserID:    userID,
+		Progress:  progress,
+	}, nil
+}
+
+// evaluateDailyEngagement checks for total engagement duration.
+func (a *ActivitiesImpl) evaluateDailyEngagement(ctx context.Context, queryResult *QueryResult, badgeType, userID string) (*BadgeResult, error) {
+	// Example: Award if total duration of 'engaged' events is >= 1 hour.
+	duration, ok := queryResult.Result.(time.Duration)
+	if !ok {
+		return &BadgeResult{Achieved: false, BadgeType: badgeType, UserID: userID}, 
+			fmt.Errorf("unexpected result type for daily_engagement: got %T", queryResult.Result)
+	}
+
+	requiredDurationSeconds := 3600.0 // 1 hour
+
+	badge := Badge{
+		ID:          "daily_engagement_1",
+		Name:        "Daily Engagement",
+		Description: "Engage for a total of 1 hour in a day.",
+		Value:       1,
+		Unit:        "hour",
+	}
+
+	if duration.Seconds() >= requiredDurationSeconds {
+		now := time.Now()
+		return &BadgeResult{
+			Achieved:  true, 
+			Badge:     &badge, 
+			EarnedAt:  &now,
+			BadgeType: badgeType,
+			UserID:    userID,
+			Progress:  1.0,
+		}, nil
+	}
+
+	// Calculate progress as a ratio of achieved duration to required duration
+	progress := duration.Seconds() / requiredDurationSeconds
+	if progress > 1.0 {
+		progress = 1.0
+	}
+
+	return &BadgeResult{
+		Achieved:  false, 
+		Badge:     &badge,
+		BadgeType: badgeType,
+		UserID:    userID,
+		Progress:  progress,
+	}, nil
+}
+
+// QueryProcessor processes timeline queries
+type QueryProcessor struct {
+	// No fields needed for now, can be extended with configuration
+}
+
+// NewQueryProcessor creates a new QueryProcessor
 func NewQueryProcessor() *QueryProcessor {
 	return &QueryProcessor{}
 }
 
-// ProcessQuery executes timeline operations on classified events
-func (qp *QueryProcessor) ProcessQuery(events []timeline.TimelineEvent, operations []QueryOperation) (*QueryResult, error) {
-	if len(operations) == 0 {
-		return &QueryResult{Result: 0}, nil
-	}
+// ProcessQuery processes a set of classified events against a list of operations
+func (p *QueryProcessor) ProcessQuery(events []timeline.TimelineEvent, operations []QueryOperation) (*QueryResult, error) {
+	var finalResult interface{}
+	var err error
 
-	// Convert TimelineEvents to EventTimeline for processing
+	// This map will store the results of operations that can be used by subsequent operations.
+	intermediateResults := make(map[string]interface{})
+
+	// Convert to EventTimeline for processing
 	eventTimeline := make(timeline.EventTimeline, len(events))
 	for i, event := range events {
 		eventTimeline[i] = timeline.Event{
@@ -340,260 +443,237 @@ func (qp *QueryProcessor) ProcessQuery(events []timeline.TimelineEvent, operatio
 		}
 	}
 
-	// Build operation results map
-	results := make(map[string]interface{})
-
-	// Process operations in dependency order (simplified - assumes proper ordering)
 	for _, op := range operations {
-		result, err := qp.executeOperation(eventTimeline, op, results)
+		finalResult, err = p.executeOperation(eventTimeline, op, intermediateResults)
 		if err != nil {
-			return nil, fmt.Errorf("failed to execute operation %s: %w", op.ID, err)
+			return nil, fmt.Errorf("error executing operation %s: %w", op.ID, err)
 		}
-		results[op.ID] = result
+		intermediateResults[op.ID] = finalResult
 	}
 
-	// Find the final result (last operation or named "result")
-	var finalResult interface{}
-	if len(operations) > 0 {
-		lastOp := operations[len(operations)-1]
-		finalResult = results[lastOp.ID]
-
-		// Check if there's a specific "result" operation
-		if resultVal, exists := results["result"]; exists {
-			finalResult = resultVal
-		}
-	}
-
-	return &QueryResult{
-		Result: finalResult,
-		Unit:   determineUnit(finalResult),
-		Metadata: map[string]interface{}{
-			"eventCount":     len(events),
-			"operationCount": len(operations),
-			"processedAt":    time.Now(),
-		},
-	}, nil
+	return &QueryResult{Result: finalResult}, nil
 }
 
-// executeOperation executes a single timeline operation
-func (qp *QueryProcessor) executeOperation(events timeline.EventTimeline, op QueryOperation, previousResults map[string]interface{}) (interface{}, error) {
+// executeOperation executes a single query operation
+func (p *QueryProcessor) executeOperation(eventTimeline timeline.EventTimeline, op QueryOperation, intermediateResults map[string]interface{}) (interface{}, error) {
 	switch op.Op {
-	case "LatestEventToState":
-		// Filter events by source type
-		filteredEvents := filterEventsByType(events, op.Source)
-		return timeline.LatestEventToState(filteredEvents, op.Equals), nil
-
 	case "HasExisted":
-		filteredEvents := filterEventsByType(events, op.Source)
-		return timeline.HasExisted(filteredEvents, op.Equals), nil
-
+		eventType, ok := op.Params["type"].(string)
+		if !ok {
+			return nil, fmt.Errorf("HasExisted requires a 'type' parameter")
+		}
+		return timeline.HasExisted(eventTimeline, eventType), nil
 	case "HasExistedWithin":
-		filteredEvents := filterEventsByType(events, op.Source)
-		window, err := time.ParseDuration(op.Window)
-		if err != nil {
-			return nil, fmt.Errorf("invalid window duration: %w", err)
+		eventType, ok := op.Params["type"].(string)
+		if !ok {
+			return nil, fmt.Errorf("HasExistedWithin requires a 'type' parameter")
 		}
-		return timeline.HasExistedWithin(filteredEvents, op.Equals, window), nil
-
+		durationStr, ok := op.Params["duration"].(string)
+		if !ok {
+			return nil, fmt.Errorf("HasExistedWithin requires a 'duration' parameter")
+		}
+		
+		// Handle 'd' unit for days
+		if strings.Contains(durationStr, "d") {
+			if days, err := strconv.Atoi(strings.TrimSuffix(durationStr, "d")); err == nil {
+				durationStr = fmt.Sprintf("%dh", days*24)
+			}
+		}
+		
+		duration, err := time.ParseDuration(durationStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid duration for HasExistedWithin: %w", err)
+		}
+		
+		// Get the boolean timeline and convert to a time.Duration for badge evaluation
+		boolTimeline := timeline.HasExistedWithin(eventTimeline, eventType, duration)
+		if len(boolTimeline) == 0 {
+			return time.Duration(0), nil
+		}
+		
+		// For daily engagement, we want to return the total duration of engagement
+		// Calculate the total duration by summing all intervals
+		var totalDuration time.Duration
+		for _, interval := range boolTimeline {
+			if interval.Value {
+				totalDuration += interval.End.Sub(interval.Start)
+			}
+		}
+		
+		return totalDuration, nil
 	case "DurationWhere":
-		// Combine conditions
-		var combinedTimeline timeline.BoolTimeline
-		if len(op.ConditionAll) > 0 {
-			var timelines []timeline.BoolTimeline
-			for _, conditionID := range op.ConditionAll {
-				// Handle both BoolTimeline and StateTimeline
-				if boolTimeline, ok := previousResults[conditionID].(timeline.BoolTimeline); ok {
-					timelines = append(timelines, boolTimeline)
-				} else if stateTimeline, ok := previousResults[conditionID].(timeline.StateTimeline); ok {
-					// Convert StateTimeline to BoolTimeline
-					boolTimeline := convertStateTimelineToBoolTimeline(stateTimeline)
-					timelines = append(timelines, boolTimeline)
-				}
-			}
-			combinedTimeline = timeline.AND(timelines...)
-		} else if len(op.ConditionAny) > 0 {
-			var timelines []timeline.BoolTimeline
-			for _, conditionID := range op.ConditionAny {
-				// Handle both BoolTimeline and StateTimeline
-				if boolTimeline, ok := previousResults[conditionID].(timeline.BoolTimeline); ok {
-					timelines = append(timelines, boolTimeline)
-				} else if stateTimeline, ok := previousResults[conditionID].(timeline.StateTimeline); ok {
-					// Convert StateTimeline to BoolTimeline
-					boolTimeline := convertStateTimelineToBoolTimeline(stateTimeline)
-					timelines = append(timelines, boolTimeline)
-				}
-			}
-			combinedTimeline = timeline.OR(timelines...)
+		sourceOpID, ok := op.Params["sourceOperationId"].(string)
+		if !ok {
+			return nil, fmt.Errorf("DurationWhere requires a 'sourceOperationId' parameter")
 		}
-
-		duration := timeline.DurationWhere(combinedTimeline)
-		return duration.Seconds(), nil // Return as seconds for JSON serialization
-
-	// Financial operators
+		sourceResult, ok := intermediateResults[sourceOpID].(timeline.BoolTimeline)
+		if !ok {
+			return nil, fmt.Errorf("source operation '%s' did not produce a BoolTimeline", sourceOpID)
+		}
+		return timeline.DurationWhere(sourceResult), nil
+	case "LongestConsecutive":
+		sourceOpID, ok := op.Params["sourceOperationId"].(string)
+		if !ok {
+			return nil, fmt.Errorf("LongestConsecutive requires a 'sourceOperationId' parameter")
+		}
+		sourceResult, ok := intermediateResults[sourceOpID].(timeline.BoolTimeline)
+		if !ok {
+			return nil, fmt.Errorf("source operation '%s' did not produce a BoolTimeline", sourceOpID)
+		}
+		return timeline.LongestConsecutiveTrueDuration(sourceResult), nil
+	case "LongestConsecutiveTrueDuration":
+		// Get the duration parameter
+		durationStr, ok := op.Params["duration"].(string)
+		if !ok {
+			return nil, fmt.Errorf("LongestConsecutiveTrueDuration requires a 'duration' parameter")
+		}
+		
+		// Handle 'd' unit for days - only used for validation
+		if strings.Contains(durationStr, "d") {
+			if _, err := strconv.Atoi(strings.TrimSuffix(durationStr, "d")); err != nil {
+				return nil, fmt.Errorf("invalid day duration: %s", durationStr)
+			}
+		} else {
+			if _, err := time.ParseDuration(durationStr); err != nil {
+				return nil, fmt.Errorf("invalid duration for LongestConsecutiveTrueDuration: %w", err)
+			}
+		}
+		
+		// For streak badges, we need to detect consecutive streak_active events
+		// Create a bool timeline that shows when streak_active events occurred
+		boolTimeline := timeline.HasExisted(eventTimeline, "streak_active")
+		
+		// Calculate the longest streak duration
+		consecutiveDuration := timeline.LongestConsecutiveTrueDuration(boolTimeline)
+		
+		// The streak_maintainer badge expects a float64 representing duration in seconds
+		return float64(consecutiveDuration.Seconds()), nil
 	case "TWAP":
-		priceTimeline := convertToPriceTimeline(events, op)
-		window, err := time.ParseDuration(getStringParam(op.Params, "window", "5m"))
+		priceTimeline, err := toPriceTimeline(eventTimeline)
 		if err != nil {
-			return nil, fmt.Errorf("invalid window duration: %w", err)
+			return nil, err
+		}
+		windowStr, ok := op.Params["window"].(string)
+		if !ok {
+			return nil, fmt.Errorf("TWAP requires a 'window' parameter")
+		}
+		window, err := time.ParseDuration(windowStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid window for TWAP: %w", err)
 		}
 		return timeline.TWAP(priceTimeline, window), nil
-
 	case "VWAP":
-		priceTimeline := convertToPriceTimeline(events, op)
-		window, err := time.ParseDuration(getStringParam(op.Params, "window", "5m"))
+		priceTimeline, err := toPriceTimeline(eventTimeline)
 		if err != nil {
-			return nil, fmt.Errorf("invalid window duration: %w", err)
+			return nil, err
+		}
+		windowStr, ok := op.Params["window"].(string)
+		if !ok {
+			return nil, fmt.Errorf("VWAP requires a 'window' parameter")
+		}
+		window, err := time.ParseDuration(windowStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid window for VWAP: %w", err)
 		}
 		return timeline.VWAP(priceTimeline, window), nil
-
 	case "BollingerBands":
-		priceTimeline := convertToPriceTimeline(events, op)
-		window, err := time.ParseDuration(getStringParam(op.Params, "window", "20m"))
+		priceTimeline, err := toPriceTimeline(eventTimeline)
 		if err != nil {
-			return nil, fmt.Errorf("invalid window duration: %w", err)
+			return nil, err
 		}
-		multiplier := getFloatParam(op.Params, "multiplier", 2.0)
-		return timeline.BollingerBands(priceTimeline, window, multiplier), nil
-
-	case "RSI":
-		priceTimeline := convertToPriceTimeline(events, op)
-		window, err := time.ParseDuration(getStringParam(op.Params, "window", "14m"))
+		windowStr, ok := op.Params["window"].(string)
+		if !ok {
+			return nil, fmt.Errorf("BollingerBands requires a 'window' parameter")
+		}
+		window, err := time.ParseDuration(windowStr)
 		if err != nil {
-			return nil, fmt.Errorf("invalid window duration: %w", err)
+			return nil, fmt.Errorf("invalid window for BollingerBands: %w", err)
 		}
-		return timeline.RSI(priceTimeline, window), nil
-
-	case "MACD":
-		priceTimeline := convertToPriceTimeline(events, op)
-		fastPeriod, err := time.ParseDuration(getStringParam(op.Params, "fast_period", "12m"))
-		if err != nil {
-			return nil, fmt.Errorf("invalid fast period: %w", err)
+		stdDevs, ok := op.Params["stdDevs"].(float64)
+		if !ok {
+			return nil, fmt.Errorf("BollingerBands requires a 'stdDevs' parameter")
 		}
-		slowPeriod, err := time.ParseDuration(getStringParam(op.Params, "slow_period", "26m"))
-		if err != nil {
-			return nil, fmt.Errorf("invalid slow period: %w", err)
+		return timeline.BollingerBands(priceTimeline, window, stdDevs), nil
+	case "NOT":
+		sourceOpID, ok := op.Params["sourceOperationId"].(string)
+		if !ok {
+			return nil, fmt.Errorf("NOT operation requires a 'sourceOperationId' parameter")
 		}
-		signalPeriod, err := time.ParseDuration(getStringParam(op.Params, "signal_period", "9m"))
-		if err != nil {
-			return nil, fmt.Errorf("invalid signal period: %w", err)
+		sourceResult, ok := intermediateResults[sourceOpID]
+		if !ok {
+			return nil, fmt.Errorf("source operation '%s' not found for NOT operation", sourceOpID)
 		}
-		return timeline.MACD(priceTimeline, fastPeriod, slowPeriod, signalPeriod), nil
-
-	case "VaR":
-		priceTimeline := convertToPriceTimeline(events, op)
-		window, err := time.ParseDuration(getStringParam(op.Params, "window", "30d"))
-		if err != nil {
-			return nil, fmt.Errorf("invalid window duration: %w", err)
+		if boolTimeline, ok := sourceResult.(timeline.BoolTimeline); ok {
+			return timeline.NOT(boolTimeline), nil
 		}
-		confidence := getFloatParam(op.Params, "confidence", 95.0)
-		return timeline.VaR(priceTimeline, window, confidence), nil
-
-	case "Drawdown":
-		priceTimeline := convertToPriceTimeline(events, op)
-		return timeline.Drawdown(priceTimeline), nil
-
-	case "SharpeRatio":
-		priceTimeline := convertToPriceTimeline(events, op)
-		window, err := time.ParseDuration(getStringParam(op.Params, "window", "30d"))
-		if err != nil {
-			return nil, fmt.Errorf("invalid window duration: %w", err)
-		}
-		riskFreeRate := getFloatParam(op.Params, "risk_free_rate", 0.02)
-		return timeline.SharpeRatio(priceTimeline, window, riskFreeRate), nil
-
-	case "TransactionVelocity":
-		priceTimeline := convertToPriceTimeline(events, op)
-		window, err := time.ParseDuration(getStringParam(op.Params, "window", "1h"))
-		if err != nil {
-			return nil, fmt.Errorf("invalid window duration: %w", err)
-		}
-		return timeline.TransactionVelocity(priceTimeline, window), nil
-
-	// Aggregation operators
-	case "MovingAverage":
-		priceTimeline := convertToPriceTimeline(events, op)
-		window, err := time.ParseDuration(getStringParam(op.Params, "window", "5m"))
-		if err != nil {
-			return nil, fmt.Errorf("invalid window duration: %w", err)
-		}
-		return timeline.MovingAggregate(priceTimeline, timeline.Avg, window, 0), nil
-
-	case "MovingSum":
-		priceTimeline := convertToPriceTimeline(events, op)
-		window, err := time.ParseDuration(getStringParam(op.Params, "window", "5m"))
-		if err != nil {
-			return nil, fmt.Errorf("invalid window duration: %w", err)
-		}
-		return timeline.MovingAggregate(priceTimeline, timeline.Sum, window, 0), nil
-
-	case "MovingMax":
-		priceTimeline := convertToPriceTimeline(events, op)
-		window, err := time.ParseDuration(getStringParam(op.Params, "window", "5m"))
-		if err != nil {
-			return nil, fmt.Errorf("invalid window duration: %w", err)
-		}
-		return timeline.MovingAggregate(priceTimeline, timeline.Max, window, 0), nil
-
-	case "MovingMin":
-		priceTimeline := convertToPriceTimeline(events, op)
-		window, err := time.ParseDuration(getStringParam(op.Params, "window", "5m"))
-		if err != nil {
-			return nil, fmt.Errorf("invalid window duration: %w", err)
-		}
-		return timeline.MovingAggregate(priceTimeline, timeline.Min, window, 0), nil
-
-	case "Percentile":
-		priceTimeline := convertToPriceTimeline(events, op)
-		percentile := getFloatParam(op.Params, "percentile", 50.0)
-		return timeline.Aggregate(priceTimeline, timeline.Percentile, percentile), nil
-
-	case "DurationInCurState":
-		if op.Of != nil {
-			// Execute the nested operation
-			nestedResult, err := qp.executeOperation(events, *op.Of, previousResults)
-			if err != nil {
-				return nil, err
-			}
-			if stateTimeline, ok := nestedResult.(timeline.StateTimeline); ok {
-				return timeline.DurationInCurState(stateTimeline), nil
-			}
-			return nil, fmt.Errorf("DurationInCurState operation requires StateTimeline input")
-		}
-		return nil, fmt.Errorf("DurationInCurState operation requires 'of' parameter")
-
-	case "Not":
-		if op.Of != nil {
-			// Execute the nested operation
-			nestedResult, err := qp.executeOperation(events, *op.Of, previousResults)
-			if err != nil {
-				return nil, err
-			}
-			if boolTimeline, ok := nestedResult.(timeline.BoolTimeline); ok {
-				return timeline.NOT(boolTimeline), nil
-			}
-		}
-		return nil, fmt.Errorf("Not operation requires 'of' parameter")
-
+		return nil, fmt.Errorf("source operation '%s' did not produce a BoolTimeline for NOT operation", sourceOpID)
 	case "AND":
+		sourceOpIDs, ok := op.Params["sourceOperationIds"].([]string)
+		if !ok {
+			return nil, fmt.Errorf("AND operation requires a 'sourceOperationIds' parameter")
+		}
 		var timelines []timeline.BoolTimeline
-		for _, conditionID := range op.ConditionAll {
-			if boolTimeline, ok := previousResults[conditionID].(timeline.BoolTimeline); ok {
+		for _, id := range sourceOpIDs {
+			sourceResult, ok := intermediateResults[id]
+			if !ok {
+				return nil, fmt.Errorf("source operation '%s' not found for AND operation", id)
+			}
+			if boolTimeline, ok := sourceResult.(timeline.BoolTimeline); ok {
 				timelines = append(timelines, boolTimeline)
+			} else {
+				return nil, fmt.Errorf("source operation '%s' did not produce a BoolTimeline for AND operation", id)
 			}
 		}
 		return timeline.AND(timelines...), nil
-
 	case "OR":
+		sourceOpIDs, ok := op.Params["sourceOperationIds"].([]string)
+		if !ok {
+			return nil, fmt.Errorf("OR operation requires a 'sourceOperationIds' parameter")
+		}
 		var timelines []timeline.BoolTimeline
-		for _, conditionID := range op.ConditionAny {
-			if boolTimeline, ok := previousResults[conditionID].(timeline.BoolTimeline); ok {
+		for _, id := range sourceOpIDs {
+			sourceResult, ok := intermediateResults[id]
+			if !ok {
+				return nil, fmt.Errorf("source operation '%s' not found for OR operation", id)
+			}
+			if boolTimeline, ok := sourceResult.(timeline.BoolTimeline); ok {
 				timelines = append(timelines, boolTimeline)
+			} else {
+				return nil, fmt.Errorf("source operation '%s' did not produce a BoolTimeline for OR operation", id)
 			}
 		}
 		return timeline.OR(timelines...), nil
-
+	case "LatestEventToState":
+		// Check for equals in Params first (new style)
+		equals, ok := op.Params["equals"].(string)
+		
+		// If not found in Params, check the Equals field (backwards compatibility)
+		if !ok && op.Equals != "" {
+			equals = op.Equals
+			ok = true
+		}
+		
+		if !ok {
+			return nil, fmt.Errorf("LatestEventToState requires an 'equals' parameter")
+		}
+		return timeline.LatestEventToState(eventTimeline, equals), nil
+	case "DurationInCurState":
+		var sourceTimeline timeline.StateTimeline
+		if op.Source != "" {
+			sourceResult, ok := intermediateResults[op.Source]
+			if !ok {
+				return nil, fmt.Errorf("source '%s' for DurationInCurState not found", op.Source)
+			}
+			sourceTimeline, ok = sourceResult.(timeline.StateTimeline)
+			if !ok {
+				return nil, fmt.Errorf("source '%s' for DurationInCurState is not a StateTimeline", op.Source)
+			}
+		} else {
+			return nil, fmt.Errorf("DurationInCurState requires a source operation that produces a StateTimeline")
+		}
+		return timeline.DurationInCurState(sourceTimeline), nil
 	default:
-		return nil, fmt.Errorf("unsupported operation: %s", op.Op)
+		return nil, fmt.Errorf("unknown operation: %s", op.Op)
 	}
 }
 
@@ -709,307 +789,4 @@ func getFloatParam(params map[string]interface{}, key string, defaultValue float
 	}
 
 	return defaultValue
-}
-
-// ProcessEventsConcurrently processes events using chunked concurrent activities
-func ProcessEventsConcurrently(ctx workflow.Context, events [][]byte, operations []QueryOperation) (*QueryResult, error) {
-	logger := workflow.GetLogger(ctx)
-	logger.Info("Starting concurrent event processing", "totalEvents", len(events), "operations", len(operations))
-
-	// Split events into chunks
-	chunks := createEventChunks(events, DefaultChunkSize)
-	logger.Info("Created event chunks", "totalChunks", len(chunks), "chunkSize", DefaultChunkSize)
-
-	// Process chunks concurrently using ExecuteActivity directly
-	// This is simpler and more efficient than workflow.Go for this use case
-	results := make([]*ChunkResult, len(chunks))
-
-	// Set up activity options for chunk processing
-	ao := workflow.ActivityOptions{
-		TaskQueue:              "timeline-processing", // Dedicated task queue for CPU-intensive work
-		StartToCloseTimeout:    time.Minute * 10,
-		HeartbeatTimeout:       time.Minute * 2,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumAttempts: 3,
-			BackoffCoefficient: 2.0,
-		},
-	}
-	ctx = workflow.WithActivityOptions(ctx, ao)
-
-	// Process chunks with limited concurrency using batching
-	concurrency := MaxConcurrency
-	if len(chunks) < concurrency {
-		concurrency = len(chunks)
-	}
-
-	for batchStart := 0; batchStart < len(chunks); batchStart += concurrency {
-		batchEnd := batchStart + concurrency
-		if batchEnd > len(chunks) {
-			batchEnd = len(chunks)
-		}
-
-		// Execute current batch of chunks concurrently
-		var batchFutures []workflow.Future
-		for i := batchStart; i < batchEnd; i++ {
-			chunk := chunks[i]
-			future := workflow.ExecuteActivity(ctx, "ProcessEventsChunkActivity", chunk, operations)
-			batchFutures = append(batchFutures, future)
-		}
-
-		// Wait for current batch to complete and collect results
-		for j, future := range batchFutures {
-			chunkIndex := batchStart + j
-			var chunkResult *ChunkResult
-			err := future.Get(ctx, &chunkResult)
-			if err != nil {
-				logger.Error("Chunk processing failed", "chunkIndex", chunkIndex, "error", err)
-				// Store error result
-				chunkResult = &ChunkResult{
-					ChunkID: chunkIndex,
-					Error:   err,
-				}
-			}
-			results[chunkIndex] = chunkResult
-		}
-
-		logger.Info("Batch completed", "batchStart", batchStart, "batchEnd", batchEnd)
-	}
-
-	// Assemble final result from chunk results
-	finalResult, err := assembleChunkResults(results, operations)
-	if err != nil {
-		logger.Error("Failed to assemble chunk results", "error", err)
-		return nil, err
-	}
-
-	logger.Info("Concurrent processing completed", "totalEvents", len(events), "finalResult", finalResult.Result)
-	return finalResult, nil
-}
-
-// createEventChunks splits events into chunks of specified size
-func createEventChunks(events [][]byte, chunkSize int) []EventChunk {
-	var chunks []EventChunk
-	totalChunks := (len(events) + chunkSize - 1) / chunkSize
-
-	for i := 0; i < len(events); i += chunkSize {
-		end := i + chunkSize
-		if end > len(events) {
-			end = len(events)
-		}
-
-		chunk := EventChunk{
-			ID:          i / chunkSize,
-			Events:      events[i:end],
-			TotalChunks: totalChunks,
-			ChunkIndex:  i / chunkSize,
-		}
-		chunks = append(chunks, chunk)
-	}
-
-	return chunks
-}
-
-// assembleChunkResults combines results from multiple chunks
-func assembleChunkResults(chunkResults []*ChunkResult, operations []QueryOperation) (*QueryResult, error) {
-	if len(chunkResults) == 0 {
-		return &QueryResult{Result: 0}, nil
-	}
-
-	// Count successful chunks and failed chunks
-	var successfulResults []*ChunkResult
-	var failedChunks []int
-	totalEvents := 0
-
-	for i, result := range chunkResults {
-		if result == nil {
-			failedChunks = append(failedChunks, i)
-			continue
-		}
-		if result.Error != nil {
-			failedChunks = append(failedChunks, result.ChunkID)
-			continue
-		}
-		successfulResults = append(successfulResults, result)
-		if eventCount, ok := result.Metadata["eventCount"].(int); ok {
-			totalEvents += eventCount
-		}
-	}
-
-	if len(successfulResults) == 0 {
-		return nil, fmt.Errorf("all chunks failed processing")
-	}
-
-	// For most operations, we need to aggregate results
-	// This is a simplified aggregation - in practice, different operations need different aggregation strategies
-	var finalResult interface{}
-
-	if len(operations) > 0 {
-		lastOp := operations[len(operations)-1]
-		
-		switch lastOp.Op {
-		case "DurationWhere", "MovingAverage", "TWAP", "VWAP":
-			// For numeric results, sum them up
-			var total float64
-			for _, result := range successfulResults {
-				if val, ok := result.Result.(float64); ok {
-					total += val
-				}
-			}
-			finalResult = total
-			
-		case "HasExisted", "HasExistedWithin":
-			// For boolean results, OR them together (true if any chunk has true)
-			finalResult = false
-			for _, result := range successfulResults {
-				if val, ok := result.Result.(bool); ok && val {
-					finalResult = true
-					break
-				}
-			}
-			
-		default:
-			// For other operations, use the first successful result
-			// This is a simplification - in practice, you'd need more sophisticated merging
-			finalResult = successfulResults[0].Result
-		}
-	}
-
-	return &QueryResult{
-		Result: finalResult,
-		Unit:   determineUnit(finalResult),
-		Metadata: map[string]interface{}{
-			"totalEvents":      totalEvents,
-			"successfulChunks": len(successfulResults),
-			"failedChunks":     len(failedChunks),
-			"operationCount":   len(operations),
-			"processedAt":      time.Now(),
-			"concurrentMode":   true,
-		},
-	}, nil
-}
-
-// EvaluateBadgeActivity evaluates badge conditions using timeline operators
-func (a *ActivitiesImpl) EvaluateBadgeActivity(ctx context.Context, events [][]byte, operations []QueryOperation, badgeType, userID string) (*BadgeResult, error) {
-	a.logger.Info("Evaluating badge", "badgeType", badgeType, "userID", userID, "events", len(events))
-
-	// First process events through timeline operations
-	queryResult, err := a.ProcessEventsActivity(ctx, events, operations)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process badge events: %w", err)
-	}
-
-	result := &BadgeResult{
-		UserID:    userID,
-		BadgeType: badgeType,
-		Earned:    false,
-		Progress:  0.0,
-		Metadata:  make(map[string]interface{}),
-	}
-
-	// Badge-specific evaluation logic
-	switch badgeType {
-	case StreakMaintainerBadge:
-		result.Earned, result.Progress = a.evaluateStreakMaintainer(queryResult)
-	case DailyEngagementBadge:
-		result.Earned, result.Progress = a.evaluateDailyEngagement(queryResult)
-	default:
-		return nil, fmt.Errorf("unknown badge type: %s", badgeType)
-	}
-
-	if result.Earned {
-		now := time.Now()
-		result.EarnedAt = &now
-	}
-
-	// Add metadata from query result
-	if queryResult.Metadata != nil {
-		for k, v := range queryResult.Metadata {
-			result.Metadata[k] = v
-		}
-	}
-
-	a.logger.Info("Badge evaluation completed", "badgeType", badgeType, "earned", result.Earned, "progress", result.Progress)
-	return result, nil
-}
-
-// evaluateStreakMaintainer evaluates the streak maintainer badge
-func (a *ActivitiesImpl) evaluateStreakMaintainer(queryResult *QueryResult) (bool, float64) {
-	// The result should be a duration in seconds from DurationWhere operation
-	if queryResult.Result == nil {
-		return false, 0.0
-	}
-
-	// For streak maintainer, we need a duration >= 14 days (2 weeks)
-	requiredDurationSeconds := float64(14 * 24 * 60 * 60) // 14 days in seconds
-
-	switch result := queryResult.Result.(type) {
-	case float64:
-		// Result is duration in seconds from DurationWhere
-		progress := result / requiredDurationSeconds
-		if progress > 1.0 {
-			progress = 1.0
-		}
-		
-		return result >= requiredDurationSeconds, progress
-		
-	case timeline.NumericTimeline:
-		// Find the maximum continuous duration in "on_time" state
-		var maxDuration time.Duration
-		for _, interval := range result {
-			duration := interval.End.Sub(interval.Start)
-			if duration > maxDuration {
-				maxDuration = duration
-			}
-		}
-		
-		progress := float64(maxDuration.Seconds()) / requiredDurationSeconds
-		if progress > 1.0 {
-			progress = 1.0
-		}
-		
-		return maxDuration.Seconds() >= requiredDurationSeconds, progress
-	}
-
-	return false, 0.0
-}
-
-// evaluateDailyEngagement evaluates the daily engagement badge
-func (a *ActivitiesImpl) evaluateDailyEngagement(queryResult *QueryResult) (bool, float64) {
-	// The result should be a duration in seconds from DurationWhere operation
-	if queryResult.Result == nil {
-		return false, 0.0
-	}
-
-	// For daily engagement, we need a duration >= 7 days
-	requiredDurationSeconds := float64(7 * 24 * 60 * 60) // 7 days in seconds
-
-	switch result := queryResult.Result.(type) {
-	case float64:
-		// Result is duration in seconds from DurationWhere
-		progress := result / requiredDurationSeconds
-		if progress > 1.0 {
-			progress = 1.0
-		}
-		
-		return result >= requiredDurationSeconds, progress
-		
-	case timeline.NumericTimeline:
-		// Find the maximum continuous duration in "active" state
-		var maxDuration time.Duration
-		for _, interval := range result {
-			duration := interval.End.Sub(interval.Start)
-			if duration > maxDuration {
-				maxDuration = duration
-			}
-		}
-		
-		progress := float64(maxDuration.Seconds()) / requiredDurationSeconds
-		if progress > 1.0 {
-			progress = 1.0
-		}
-		
-		return maxDuration.Seconds() >= requiredDurationSeconds, progress
-	}
-
-	return false, 0.0
 }

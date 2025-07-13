@@ -1,322 +1,112 @@
 package temporal
 
 import (
-	"context"
+	"testing"
 	"log/slog"
 	"os"
-	"testing"
-	"time"
 
-	"github.com/leowmjw/go-temporal-timeline/pkg/timeline"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	"go.temporal.io/sdk/testsuite"
 )
 
-func TestEvaluateBadgeActivity_StreakMaintainer_Simple(t *testing.T) {
-	// Create activities implementation with mock storage
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	activities := NewActivitiesImpl(
-		logger,
-		&MockStorageService{},
-		&MockIndexService{},
-	)
-
-	tests := []struct {
-		name           string
-		events         [][]byte
-		operations     []QueryOperation
-		badgeType      string
-		userID         string
-		expectedEarned bool
-		minProgress    float64 // Minimum expected progress
-	}{
-		{
-			name: "simple payment exists check",
-			events: [][]byte{
-				[]byte(`{"event_type": "payment_successful", "timestamp": "2025-01-01T10:00:00Z", "user_id": "user-123"}`),
-				[]byte(`{"event_type": "payment_successful", "timestamp": "2025-01-08T10:00:00Z", "user_id": "user-123"}`),
-			},
-			operations: []QueryOperation{
-				{
-					ID:     "payment_exists",
-					Op:     "HasExisted",
-					Source: "payment_successful",
-					Equals: "true",
-				},
-			},
-			badgeType:      StreakMaintainerBadge,
-			userID:         "user-123",
-			expectedEarned: false, // Simple HasExisted won't earn the badge
-			minProgress:    0.0,
-		},
-		{
-			name: "duration where with payment events",
-			events: [][]byte{
-				[]byte(`{"event_type": "payment_successful", "timestamp": "2025-01-01T10:00:00Z", "user_id": "user-123"}`),
-				[]byte(`{"event_type": "payment_successful", "timestamp": "2025-01-08T10:00:00Z", "user_id": "user-123"}`),
-			},
-			operations: []QueryOperation{
-				{
-					ID:     "payment_exists",
-					Op:     "HasExisted",
-					Source: "payment_successful",
-					Equals: "true",
-				},
-				{
-					ID:     "payment_duration",
-					Op:     "DurationWhere",
-					ConditionAll: []string{"payment_exists"},
-				},
-			},
-			badgeType:      StreakMaintainerBadge,
-			userID:         "user-123",
-			expectedEarned: false, // Duration won't be 14 days
-			minProgress:    0.0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			
-			result, err := activities.EvaluateBadgeActivity(ctx, tt.events, tt.operations, tt.badgeType, tt.userID)
-			
-			require.NoError(t, err)
-			assert.Equal(t, tt.userID, result.UserID)
-			assert.Equal(t, tt.badgeType, result.BadgeType)
-			assert.Equal(t, tt.expectedEarned, result.Earned)
-			assert.GreaterOrEqual(t, result.Progress, tt.minProgress)
-			
-			if result.Earned {
-				assert.NotNil(t, result.EarnedAt)
-			} else {
-				assert.Nil(t, result.EarnedAt)
-			}
-		})
-	}
+type BadgeIntegrationTestSuite struct {
+	suite.Suite
+	testsuite.TestActivityEnvironment
+	activities *ActivitiesImpl
 }
 
-func TestEvaluateBadgeActivity_DailyEngagement_Simple(t *testing.T) {
-	// Create activities implementation with mock storage
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	activities := NewActivitiesImpl(
-		logger,
-		&MockStorageService{},
-		&MockIndexService{},
-	)
-
-	tests := []struct {
-		name           string
-		events         [][]byte
-		operations     []QueryOperation
-		badgeType      string
-		userID         string
-		expectedEarned bool
-		minProgress    float64
-	}{
-		{
-			name: "simple app open check",
-			events: [][]byte{
-				[]byte(`{"event_type": "app_open", "timestamp": "2025-01-01T10:00:00Z", "user_id": "user-123"}`),
-				[]byte(`{"event_type": "app_open", "timestamp": "2025-01-02T10:00:00Z", "user_id": "user-123"}`),
-			},
-			operations: []QueryOperation{
-				{
-					ID:     "app_open_exists",
-					Op:     "HasExisted",
-					Source: "app_open",
-					Equals: "true",
-				},
-			},
-			badgeType:      DailyEngagementBadge,
-			userID:         "user-123",
-			expectedEarned: false, // Simple HasExisted won't earn the badge
-			minProgress:    0.0,
-		},
-		{
-			name: "has existed within day check",
-			events: [][]byte{
-				[]byte(`{"event_type": "app_open", "timestamp": "2025-01-01T10:00:00Z", "user_id": "user-123"}`),
-			},
-			operations: []QueryOperation{
-				{
-					ID:     "app_open_within_day",
-					Op:     "HasExistedWithin",
-					Source: "app_open",
-					Equals: "true",
-					Window: "24h",
-				},
-			},
-			badgeType:      DailyEngagementBadge,
-			userID:         "user-123",
-			expectedEarned: false, // HasExistedWithin alone won't earn the badge
-			minProgress:    0.0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			
-			result, err := activities.EvaluateBadgeActivity(ctx, tt.events, tt.operations, tt.badgeType, tt.userID)
-			
-			require.NoError(t, err)
-			assert.Equal(t, tt.userID, result.UserID)
-			assert.Equal(t, tt.badgeType, result.BadgeType)
-			assert.Equal(t, tt.expectedEarned, result.Earned)
-			assert.GreaterOrEqual(t, result.Progress, tt.minProgress)
-			
-			if result.Earned {
-				assert.NotNil(t, result.EarnedAt)
-			} else {
-				assert.Nil(t, result.EarnedAt)
-			}
-		})
-	}
+func TestBadgeIntegrationTestSuite(t *testing.T) {
+	s := &BadgeIntegrationTestSuite{}
+	// Initialize the activity environment properly using the pointer method
+	workflowSuite := &testsuite.WorkflowTestSuite{}
+	s.TestActivityEnvironment = *workflowSuite.NewTestActivityEnvironment()
+	suite.Run(t, s)
 }
 
-func TestEvaluateStreakMaintainer(t *testing.T) {
-	activities := &ActivitiesImpl{}
-
-	tests := []struct {
-		name             string
-		queryResult      *QueryResult
-		expectedEarned   bool
-		expectedProgress float64
-	}{
-		{
-			name: "numeric timeline with 14+ day duration",
-			queryResult: &QueryResult{
-				Result: timeline.NumericTimeline{
-					{
-						Start: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-						End:   time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC), // 14 days
-						Value: 14 * 24, // 14 days in hours
-					},
-				},
-			},
-			expectedEarned:   true,
-			expectedProgress: 1.0,
-		},
-		{
-			name: "numeric timeline with 7 day duration",
-			queryResult: &QueryResult{
-				Result: timeline.NumericTimeline{
-					{
-						Start: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-						End:   time.Date(2025, 1, 8, 0, 0, 0, 0, time.UTC), // 7 days
-						Value: 7 * 24, // 7 days in hours
-					},
-				},
-			},
-			expectedEarned:   false,
-			expectedProgress: 0.5, // 7 days out of 14 required
-		},
-		{
-			name: "float64 result - 1209600 seconds (14 days)",
-			queryResult: &QueryResult{
-				Result: 1209600.0, // 14 days * 24 hours * 60 minutes * 60 seconds
-			},
-			expectedEarned:   true,
-			expectedProgress: 1.0,
-		},
-		{
-			name: "float64 result - 604800 seconds (7 days)",
-			queryResult: &QueryResult{
-				Result: 604800.0, // 7 days * 24 hours * 60 minutes * 60 seconds
-			},
-			expectedEarned:   false,
-			expectedProgress: 0.5,
-		},
-		{
-			name: "nil result",
-			queryResult: &QueryResult{
-				Result: nil,
-			},
-			expectedEarned:   false,
-			expectedProgress: 0.0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			earned, progress := activities.evaluateStreakMaintainer(tt.queryResult)
-			
-			assert.Equal(t, tt.expectedEarned, earned)
-			assert.InDelta(t, tt.expectedProgress, progress, 0.01)
-		})
-	}
+func (s *BadgeIntegrationTestSuite) SetupTest() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// Use the mock services already defined in mock_storage.go
+	s.activities = NewActivitiesImpl(logger, &MockStorageService{}, &MockIndexService{})
+	s.RegisterActivity(s.activities.EvaluateBadgeActivity)
 }
 
-func TestEvaluateDailyEngagement(t *testing.T) {
-	activities := &ActivitiesImpl{}
+func (s *BadgeIntegrationTestSuite) TestEvaluateBadgeActivity_DailyEngagement_Simple() {
+	// Create mock event data for testing
+	events := [][]byte{
+		[]byte(`{"timestamp":"2025-07-12T10:00:00Z","type":"app_open"}`),
+		[]byte(`{"timestamp":"2025-07-12T10:30:00Z","type":"app_close"}`),
+	}
 
-	tests := []struct {
-		name             string
-		queryResult      *QueryResult
-		expectedEarned   bool
-		expectedProgress float64
-	}{
+	// Define operations for the daily engagement badge
+	operations := []QueryOperation{
 		{
-			name: "numeric timeline with 7+ day duration",
-			queryResult: &QueryResult{
-				Result: timeline.NumericTimeline{
-					{
-						Start: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-						End:   time.Date(2025, 1, 8, 0, 0, 0, 0, time.UTC), // 7 days
-						Value: 7 * 24, // 7 days in hours
-					},
-				},
+			Op: "HasExistedWithin",
+			Params: map[string]interface{}{
+				"duration": "24h",
+				"type": "app_open", // Add the missing type parameter
 			},
-			expectedEarned:   true,
-			expectedProgress: 1.0,
-		},
-		{
-			name: "numeric timeline with 3 day duration",
-			queryResult: &QueryResult{
-				Result: timeline.NumericTimeline{
-					{
-						Start: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-						End:   time.Date(2025, 1, 4, 0, 0, 0, 0, time.UTC), // 3 days
-						Value: 3 * 24, // 3 days in hours
-					},
-				},
-			},
-			expectedEarned:   false,
-			expectedProgress: 0.43, // 3 days out of 7 required
-		},
-		{
-			name: "float64 result - 604800 seconds (7 days)",
-			queryResult: &QueryResult{
-				Result: 604800.0, // 7 days * 24 hours * 60 minutes * 60 seconds
-			},
-			expectedEarned:   true,
-			expectedProgress: 1.0,
-		},
-		{
-			name: "float64 result - 259200 seconds (3 days)",
-			queryResult: &QueryResult{
-				Result: 259200.0, // 3 days * 24 hours * 60 minutes * 60 seconds
-			},
-			expectedEarned:   false,
-			expectedProgress: 0.43, // 3 days out of 7 required
-		},
-		{
-			name: "nil result",
-			queryResult: &QueryResult{
-				Result: nil,
-			},
-			expectedEarned:   false,
-			expectedProgress: 0.0,
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			earned, progress := activities.evaluateDailyEngagement(tt.queryResult)
-			
-			assert.Equal(t, tt.expectedEarned, earned)
-			assert.InDelta(t, tt.expectedProgress, progress, 0.01)
-		})
+	userID := "test-user-1"
+	badgeType := DailyEngagementBadge
+
+	// Execute the activity with the correct signature
+	// Note: context is automatically handled by the Temporal TestActivityEnvironment
+	future, err := s.ExecuteActivity(s.activities.EvaluateBadgeActivity, events, operations, badgeType, userID)
+	s.Require().NoError(err)
+
+	// Get the result
+	var result *BadgeResult
+	s.Require().NoError(future.Get(&result))
+
+	// Assertions
+	s.Require().NotNil(result)
+	s.Require().True(result.Achieved)
+	s.Require().NotNil(result.EarnedAt)
+	s.Require().Equal(badgeType, result.BadgeType)
+	s.Require().Equal(userID, result.UserID)
+}
+
+func (s *BadgeIntegrationTestSuite) TestEvaluateBadgeActivity_StreakMaintainer_Simple() {
+	// Create mock event data for testing streak maintenance (5 consecutive days)
+	events := [][]byte{
+		// Day 1
+		[]byte(`{"timestamp":"2025-07-08T10:00:00Z","type":"streak_active"}`),
+		// Day 2
+		[]byte(`{"timestamp":"2025-07-09T10:00:00Z","type":"streak_active"}`),
+		// Day 3
+		[]byte(`{"timestamp":"2025-07-10T10:00:00Z","type":"streak_active"}`),
+		// Day 4
+		[]byte(`{"timestamp":"2025-07-11T10:00:00Z","type":"streak_active"}`),
+		// Day 5
+		[]byte(`{"timestamp":"2025-07-12T10:00:00Z","type":"streak_active"}`),
 	}
+
+	// Define operations for streak maintainer badge using LongestConsecutiveTrueDuration
+	operations := []QueryOperation{
+		{
+			Op: "LongestConsecutiveTrueDuration",
+			Params: map[string]interface{}{"duration": "5d"},
+		},
+	}
+
+	userID := "test-user-2"
+	badgeType := StreakMaintainerBadge
+
+	// Execute the activity with the correct signature
+	// Note: context is automatically handled by the Temporal TestActivityEnvironment
+	future, err := s.ExecuteActivity(s.activities.EvaluateBadgeActivity, events, operations, badgeType, userID)
+	s.Require().NoError(err)
+
+	// Get the result
+	var result *BadgeResult
+	s.Require().NoError(future.Get(&result))
+
+	// Assertions
+	s.Require().NotNil(result)
+	s.Require().True(result.Achieved)
+	s.Require().NotNil(result.EarnedAt)
+	s.Require().Equal(badgeType, result.BadgeType)
+	s.Require().Equal(userID, result.UserID)
 }

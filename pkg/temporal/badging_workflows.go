@@ -1,6 +1,8 @@
 package temporal
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"time"
 
@@ -32,12 +34,24 @@ type BadgeRequest struct {
 	Parameters  map[string]interface{} `json:"parameters,omitempty"` // Badge-specific parameters
 }
 
+// Badge represents an achievement unlocked by a user.
+type Badge struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	AchievedAt  time.Time   `json:"achieved_at"`
+	Icon        string      `json:"icon,omitempty"`
+	Value       interface{} `json:"value,omitempty"`
+	Unit        string      `json:"unit,omitempty"`
+}
+
 // BadgeResult represents the result of badge evaluation
 type BadgeResult struct {
+	Badge       *Badge                 `json:"badge,omitempty"`
+	Achieved    bool                   `json:"achieved"`
 	UserID      string                 `json:"user_id"`
 	BadgeType   string                 `json:"badge_type"`
-	Earned      bool                   `json:"earned"`
-	Progress    float64                `json:"progress"`    // 0.0 to 1.0
+	Progress    float64                `json:"progress"` // 0.0 to 1.0
 	Details     map[string]interface{} `json:"details,omitempty"`
 	EarnedAt    *time.Time             `json:"earned_at,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
@@ -95,7 +109,7 @@ func StreakMaintainerWorkflow(ctx workflow.Context, request BadgeRequest) (*Badg
 		return nil, fmt.Errorf("failed to evaluate badge: %w", err)
 	}
 
-	logger.Info("Streak Maintainer badge evaluation completed", "userID", request.UserID, "earned", result.Earned)
+	logger.Info("Streak Maintainer badge evaluation completed", "userID", request.UserID, "earned", result.Achieved)
 	return result, nil
 }
 
@@ -157,11 +171,25 @@ func DailyEngagementWorkflow(ctx workflow.Context, request BadgeRequest) (*Badge
 		return nil, fmt.Errorf("failed to evaluate badge: %w", err)
 	}
 
-	logger.Info("Daily Engagement badge evaluation completed", "userID", request.UserID, "earned", result.Earned)
+	logger.Info("Daily Engagement badge evaluation completed", "userID", request.UserID, "earned", result.Achieved)
 	return result, nil
 }
 
 // GenerateBadgeWorkflowID creates a workflow ID for badge evaluation
 func GenerateBadgeWorkflowID(userID, badgeType string) string {
-	return fmt.Sprintf("%s%s-%s-%d", BadgeWorkflowIDPrefix, userID, badgeType, time.Now().UnixNano())
+	// Add cryptographic randomness to ensure uniqueness
+	b := make([]byte, 4)
+	_, err := rand.Read(b)
+	randomPart := uint32(1000000) // Default in case of error
+	if err == nil {
+		randomPart = binary.BigEndian.Uint32(b)
+	}
+
+	return fmt.Sprintf("%s%s-%s-%d-%d-%d", 
+		BadgeWorkflowIDPrefix, 
+		userID, 
+		badgeType, 
+		time.Now().UnixNano(),
+		time.Now().UnixMicro() % 10000, // Additional timestamp randomness
+		randomPart) // True cryptographic randomness
 }

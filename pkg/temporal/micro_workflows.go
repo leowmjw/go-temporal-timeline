@@ -145,7 +145,7 @@ func LatestEventToStateWorkflow(ctx workflow.Context, request OperatorRequest) (
 		OperatorID:  request.OperatorID,
 		PartitionID: request.PartitionID,
 		Result:      operatorResult,
-		Unit:        determineUnit(operatorResult),
+		Unit:        DetermineUnit(request.Operation.Op),
 		Metadata: map[string]interface{}{
 			"eventCount":   len(request.Events),
 			"operatorType": request.Operation.Op,
@@ -209,7 +209,7 @@ func HasExistedWorkflow(ctx workflow.Context, request OperatorRequest) (*Operato
 		OperatorID:  request.OperatorID,
 		PartitionID: request.PartitionID,
 		Result:      operatorResult,
-		Unit:        determineUnit(operatorResult),
+		Unit:        DetermineUnit(request.Operation.Op),
 		Metadata: map[string]interface{}{
 			"eventCount":   len(request.Events),
 			"operatorType": request.Operation.Op,
@@ -259,7 +259,7 @@ func DurationWhereWorkflow(ctx workflow.Context, request OperatorRequest) (*Oper
 		OperatorID:  request.OperatorID,
 		PartitionID: request.PartitionID,
 		Result:      operatorResult,
-		Unit:        determineUnit(operatorResult),
+		Unit:        DetermineUnit(request.Operation.Op),
 		Metadata: map[string]interface{}{
 			"eventCount":   len(request.Events),
 			"operatorType": request.Operation.Op,
@@ -516,6 +516,25 @@ func partitionEvents(events [][]byte, partitionSize int) [][][]byte {
 	}
 
 	return partitions
+}
+
+// assembleOperatorResults combines results from multiple operator workflows
+// DetermineUnit determines the unit for an operator's result.
+func DetermineUnit(op string) string {
+	switch op {
+	case "DurationWhere", "LongestConsecutive", "DurationInCurState":
+		return "seconds"
+	case "HasExisted", "HasExistedWithin":
+		return "boolean"
+	case "TWAP", "VWAP":
+		return "value"
+	case "BollingerBands":
+		return "bands"
+	case "LatestEventToState":
+		return "state"
+	default:
+		return "count"
+	}
 }
 
 // assembleOperatorResults combines results from multiple operator workflows

@@ -284,6 +284,52 @@ func mergeBoolIntervals(intervals BoolTimeline) BoolTimeline {
 	return merged
 }
 
+// LongestConsecutiveTrueDuration calculates the longest continuous period where Value is true in a BoolTimeline.
+func LongestConsecutiveTrueDuration(timeline BoolTimeline) time.Duration {
+	if len(timeline) == 0 {
+		return 0
+	}
+
+	// Ensure intervals are sorted by start time
+	sort.Slice(timeline, func(i, j int) bool {
+		return timeline[i].Start.Before(timeline[j].Start)
+	})
+
+	var longestDuration time.Duration
+	var currentConsecutiveDuration time.Duration
+	var lastEnd time.Time
+
+	for i, interval := range timeline {
+		if !interval.Value {
+			// Reset if the interval is false
+			currentConsecutiveDuration = 0
+			continue
+		}
+
+		// If this is the first true interval, or it's consecutive to the last one
+		if i == 0 || interval.Start.Equal(lastEnd) || interval.Start.Before(lastEnd) {
+			// If it overlaps or is adjacent, extend the current consecutive duration
+			// Ensure we don't double count overlaps
+			if interval.Start.Before(lastEnd) {
+				currentConsecutiveDuration += interval.End.Sub(lastEnd)
+			} else {
+				currentConsecutiveDuration += interval.End.Sub(interval.Start)
+			}
+		} else {
+			// Not consecutive, start a new consecutive duration
+			currentConsecutiveDuration = interval.End.Sub(interval.Start)
+		}
+
+		lastEnd = interval.End
+
+		if currentConsecutiveDuration > longestDuration {
+			longestDuration = currentConsecutiveDuration
+		}
+	}
+
+	return longestDuration
+}
+
 func andTwoTimelines(a, b BoolTimeline) BoolTimeline {
 	var result BoolTimeline
 

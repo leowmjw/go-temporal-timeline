@@ -10,6 +10,8 @@ import (
 	"go.temporal.io/sdk/testsuite"
 )
 
+
+
 type ConcurrentProcessingTestSuite struct {
 	suite.Suite
 	testsuite.WorkflowTestSuite
@@ -55,10 +57,10 @@ func (s *ConcurrentProcessingTestSuite) TestAssembleChunkResults_DurationSum() {
 		{ID: "test", Op: "DurationWhere"},
 	}
 
-	chunkResults := []*ChunkResult{
-		{ChunkID: 0, Result: 10.5, Metadata: map[string]interface{}{"eventCount": 5000}},
-		{ChunkID: 1, Result: 15.3, Metadata: map[string]interface{}{"eventCount": 5000}},
-		{ChunkID: 2, Result: 8.2, Metadata: map[string]interface{}{"eventCount": 3000}},
+	chunkResults := []*QueryResult{
+		{Result: 10.5, Metadata: map[string]interface{}{"eventCount": 5000}},
+		{Result: 15.3, Metadata: map[string]interface{}{"eventCount": 5000}},
+		{Result: 8.2, Metadata: map[string]interface{}{"eventCount": 3000}},
 	}
 
 	result, err := assembleChunkResults(chunkResults, operations)
@@ -76,10 +78,10 @@ func (s *ConcurrentProcessingTestSuite) TestAssembleChunkResults_BooleanOR() {
 		{ID: "test", Op: "HasExisted"},
 	}
 
-	chunkResults := []*ChunkResult{
-		{ChunkID: 0, Result: false, Metadata: map[string]interface{}{"eventCount": 5000}},
-		{ChunkID: 1, Result: true, Metadata: map[string]interface{}{"eventCount": 5000}},
-		{ChunkID: 2, Result: false, Metadata: map[string]interface{}{"eventCount": 3000}},
+	chunkResults := []*QueryResult{
+		{Result: false, Metadata: map[string]interface{}{"eventCount": 5000}},
+		{Result: true, Metadata: map[string]interface{}{"eventCount": 5000}},
+		{Result: false, Metadata: map[string]interface{}{"eventCount": 3000}},
 	}
 
 	result, err := assembleChunkResults(chunkResults, operations)
@@ -93,10 +95,10 @@ func (s *ConcurrentProcessingTestSuite) TestAssembleChunkResults_WithFailures() 
 		{ID: "test", Op: "DurationWhere"},
 	}
 
-	chunkResults := []*ChunkResult{
-		{ChunkID: 0, Result: 10.5, Metadata: map[string]interface{}{"eventCount": 5000}},
-		{ChunkID: 1, Error: assert.AnError}, // Failed chunk
-		{ChunkID: 2, Result: 8.2, Metadata: map[string]interface{}{"eventCount": 3000}},
+	chunkResults := []*QueryResult{
+		{Result: 10.5, Metadata: map[string]interface{}{"eventCount": 5000}},
+		{Error: assert.AnError}, // Failed chunk
+		{Result: 8.2, Metadata: map[string]interface{}{"eventCount": 3000}},
 	}
 
 	result, err := assembleChunkResults(chunkResults, operations)
@@ -113,9 +115,9 @@ func (s *ConcurrentProcessingTestSuite) TestAssembleChunkResults_AllFailed() {
 		{ID: "test", Op: "DurationWhere"},
 	}
 
-	chunkResults := []*ChunkResult{
-		{ChunkID: 0, Error: assert.AnError},
-		{ChunkID: 1, Error: assert.AnError},
+	chunkResults := []*QueryResult{
+		{Error: assert.AnError},
+		{Error: assert.AnError},
 	}
 
 	result, err := assembleChunkResults(chunkResults, operations)

@@ -1,6 +1,40 @@
 # AGENT.md
 
-## Latest Update: Multi-Customer Fraud Detection Implementation (July 5, 2025)
+## Latest Update: Badge Evaluation System with LongestConsecutiveTrueDuration Operator (July 13, 2025)
+
+### Timeline Operator: LongestConsecutiveTrueDuration
+
+#### Overview
+The `LongestConsecutiveTrueDuration` operator is a fundamental timeline query operation that calculates the longest continuous duration where a boolean timeline maintains a TRUE state. This operator is essential for evaluating user engagement streaks, continuous service availability, and other time-persistence metrics.
+
+#### Operator Specification
+
+- **Input**: A boolean timeline (BoolTimeline)
+- **Parameters**: 
+  - `duration`: Optional string parameter specifying the minimum duration to consider (e.g., "24h", "7d")
+- **Output**: Float64 representing the duration in seconds of the longest consecutive period where the timeline was TRUE
+- **Usage Context**: Badge evaluation (particularly streak maintenance badges), SLA monitoring, engagement analytics
+
+#### Test Coverage
+
+| Test Case | Input Timeline State | Parameters | Expected Result | Description |
+|-----------|----------------------|------------|-----------------|-------------|
+| Basic True Streak | TRUE for 24 hours | None | 86400.0 | Returns seconds in a 24-hour period |
+| Multiple True Periods | TRUE for 2h, FALSE for 1h, TRUE for 3h | None | 10800.0 | Should return longest streak (3h = 10800s) |
+| No True Values | All FALSE | None | 0.0 | Should return zero when no TRUE values exist |
+| Minimum Duration Filter | TRUE for 1h, 3h, 2h (separate periods) | duration="2h30m" | 10800.0 | Only 3h period exceeds minimum |
+| Short Interruptions | TRUE with 5-minute FALSE gaps | None | Duration of longest uninterrupted TRUE segment | Tests resilience to short interruptions |
+| Empty Timeline | Empty timeline | None | 0.0 | Should gracefully handle empty timelines |
+| Duration with Days | TRUE for 2 days | duration="1d" | 172800.0 | Should correctly parse and handle day units |
+
+#### Integration with Badge System
+
+The operator is used in badge evaluation workflows to determine if users maintain continuous engagement streaks. Badge types that leverage this operator include:
+
+1. **Streak Maintainer**: Recognizes users who maintain activity for consecutive days
+2. **Daily Engagement**: Rewards users who engage consistently each day
+
+## Earlier Update: Multi-Customer Fraud Detection Implementation (July 5, 2025)
 
 ### Multi-Customer Fraud Detection Implementation
 

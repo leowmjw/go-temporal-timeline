@@ -483,7 +483,7 @@ func TestVideoDistributionRebuffering(t *testing.T) {
 		Op:     "LatestEventToState",
 		Source: "playerStateChange",
 		Equals: "buffer",
-	}, nil)
+	}, map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("executeOperation failed: %v", err)
 	}
