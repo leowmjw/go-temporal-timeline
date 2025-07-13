@@ -105,7 +105,7 @@ func TestGenerateBadgeWorkflowID(t *testing.T) {
 	tests := []struct {
 		name      string
 		userID    string
-		badgeType string
+		badgeType BadgeType
 	}{
 		{
 			name:      "streak maintainer badge",
@@ -116,6 +116,21 @@ func TestGenerateBadgeWorkflowID(t *testing.T) {
 			name:      "daily engagement badge",
 			userID:    "user-456",
 			badgeType: DailyEngagementBadge,
+		},
+		{
+			name:      "topic dominator badge",
+			userID:    "user-789",
+			badgeType: TopicDominatorBadge,
+		},
+		{
+			name:      "feature pioneer badge",
+			userID:    "user-abc",
+			badgeType: FeaturePioneerBadge,
+		},
+		{
+			name:      "weekend warrior badge",
+			userID:    "user-def",
+			badgeType: WeekendWarriorBadge,
 		},
 	}
 
@@ -128,7 +143,7 @@ func TestGenerateBadgeWorkflowID(t *testing.T) {
 			}
 
 			// Check that it contains the expected prefix and components
-			expectedPrefix := BadgeWorkflowIDPrefix + tt.userID + "-" + tt.badgeType + "-"
+			expectedPrefix := BadgeWorkflowIDPrefix + tt.userID + "-" + string(tt.badgeType) + "-"
 			if !strings.HasPrefix(id, expectedPrefix) {
 				t.Errorf("Expected workflow ID to start with '%s', got '%s'", expectedPrefix, id)
 			}

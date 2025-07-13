@@ -25,7 +25,7 @@ func TestEvaluateBadgeActivity_StreakMaintainer_Simple(t *testing.T) {
 		name           string
 		events         [][]byte
 		operations     []QueryOperation
-		badgeType      string
+		badgeType      BadgeType
 		userID         string
 		expectedEarned bool
 		minProgress    float64 // Minimum expected progress
@@ -111,7 +111,7 @@ func TestEvaluateBadgeActivity_DailyEngagement_Simple(t *testing.T) {
 		name           string
 		events         [][]byte
 		operations     []QueryOperation
-		badgeType      string
+		badgeType      BadgeType
 		userID         string
 		expectedEarned bool
 		minProgress    float64

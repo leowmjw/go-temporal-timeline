@@ -938,8 +938,11 @@ func assembleChunkResults(chunkResults []*ChunkResult, operations []QueryOperati
 }
 
 // EvaluateBadgeActivity evaluates badge conditions using timeline operators
-func (a *ActivitiesImpl) EvaluateBadgeActivity(ctx context.Context, events [][]byte, operations []QueryOperation, badgeType, userID string) (*BadgeResult, error) {
+func (a *ActivitiesImpl) EvaluateBadgeActivity(ctx context.Context, events [][]byte, operations []QueryOperation, badgeType BadgeType, userID string) (*BadgeResult, error) {
 	a.logger.Info("Evaluating badge", "badgeType", badgeType, "userID", userID, "events", len(events))
+
+	// Record metrics (would integrate with Prometheus in production)
+	// activity.GetMetricsScope(ctx).Counter("evaluate_badge").Inc(1)
 
 	// First process events through timeline operations
 	queryResult, err := a.ProcessEventsActivity(ctx, events, operations)
@@ -961,8 +964,14 @@ func (a *ActivitiesImpl) EvaluateBadgeActivity(ctx context.Context, events [][]b
 		result.Earned, result.Progress = a.evaluateStreakMaintainer(queryResult)
 	case DailyEngagementBadge:
 		result.Earned, result.Progress = a.evaluateDailyEngagement(queryResult)
+	case TopicDominatorBadge:
+		result.Earned, result.Progress = a.evaluateTopicDominator(queryResult)
+	case FeaturePioneerBadge:
+		result.Earned, result.Progress = a.evaluateFeaturePioneer(queryResult)
+	case WeekendWarriorBadge:
+		result.Earned, result.Progress = a.evaluateWeekendWarrior(queryResult)
 	default:
-		return nil, fmt.Errorf("unknown badge type: %s", badgeType)
+		return nil, temporal.NewNonRetryableApplicationError("unknown badge type", "UnknownBadgeType", fmt.Errorf("badge type %s is not supported", badgeType))
 	}
 
 	if result.Earned {
@@ -1031,6 +1040,129 @@ func (a *ActivitiesImpl) evaluateDailyEngagement(queryResult *QueryResult) (bool
 
 	// For daily engagement, we need a duration >= 7 days
 	requiredDurationSeconds := float64(7 * 24 * 60 * 60) // 7 days in seconds
+
+	switch result := queryResult.Result.(type) {
+	case float64:
+		// Result is the longest consecutive duration in seconds from LongestConsecutiveTrueDuration
+		progress := result / requiredDurationSeconds
+		if progress > 1.0 {
+			progress = 1.0
+		}
+		
+		return result >= requiredDurationSeconds, progress
+		
+	case timeline.NumericTimeline:
+		// Shouldn't happen with LongestConsecutiveTrueDuration, but handle gracefully
+		var maxDuration time.Duration
+		for _, interval := range result {
+			duration := interval.End.Sub(interval.Start)
+			if duration > maxDuration {
+				maxDuration = duration
+			}
+		}
+		
+		progress := float64(maxDuration.Seconds()) / requiredDurationSeconds
+		if progress > 1.0 {
+			progress = 1.0
+		}
+		
+		return maxDuration.Seconds() >= requiredDurationSeconds, progress
+	}
+
+	return false, 0.0
+}
+
+// evaluateTopicDominator evaluates the topic dominator badge
+func (a *ActivitiesImpl) evaluateTopicDominator(queryResult *QueryResult) (bool, float64) {
+	// The result should be a duration in seconds from LongestConsecutiveTrueDuration operation
+	if queryResult.Result == nil {
+		return false, 0.0
+	}
+
+	// For topic dominator, we need a duration >= 3 days
+	requiredDurationSeconds := float64(3 * 24 * 60 * 60) // 3 days in seconds
+
+	switch result := queryResult.Result.(type) {
+	case float64:
+		// Result is the longest consecutive duration in seconds from LongestConsecutiveTrueDuration
+		progress := result / requiredDurationSeconds
+		if progress > 1.0 {
+			progress = 1.0
+		}
+		
+		return result >= requiredDurationSeconds, progress
+		
+	case timeline.NumericTimeline:
+		// Shouldn't happen with LongestConsecutiveTrueDuration, but handle gracefully
+		var maxDuration time.Duration
+		for _, interval := range result {
+			duration := interval.End.Sub(interval.Start)
+			if duration > maxDuration {
+				maxDuration = duration
+			}
+		}
+		
+		progress := float64(maxDuration.Seconds()) / requiredDurationSeconds
+		if progress > 1.0 {
+			progress = 1.0
+		}
+		
+		return maxDuration.Seconds() >= requiredDurationSeconds, progress
+	}
+
+	return false, 0.0
+}
+
+// evaluateFeaturePioneer evaluates the feature pioneer badge
+func (a *ActivitiesImpl) evaluateFeaturePioneer(queryResult *QueryResult) (bool, float64) {
+	// The result should be a duration in seconds from LongestConsecutiveTrueDuration operation
+	if queryResult.Result == nil {
+		return false, 0.0
+	}
+
+	// For feature pioneer, we need a duration >= 3 days of sustained use
+	requiredDurationSeconds := float64(3 * 24 * 60 * 60) // 3 days in seconds
+
+	switch result := queryResult.Result.(type) {
+	case float64:
+		// Result is the longest consecutive duration in seconds from LongestConsecutiveTrueDuration
+		progress := result / requiredDurationSeconds
+		if progress > 1.0 {
+			progress = 1.0
+		}
+		
+		return result >= requiredDurationSeconds, progress
+		
+	case timeline.NumericTimeline:
+		// Shouldn't happen with LongestConsecutiveTrueDuration, but handle gracefully
+		var maxDuration time.Duration
+		for _, interval := range result {
+			duration := interval.End.Sub(interval.Start)
+			if duration > maxDuration {
+				maxDuration = duration
+			}
+		}
+		
+		progress := float64(maxDuration.Seconds()) / requiredDurationSeconds
+		if progress > 1.0 {
+			progress = 1.0
+		}
+		
+		return maxDuration.Seconds() >= requiredDurationSeconds, progress
+	}
+
+	return false, 0.0
+}
+
+// evaluateWeekendWarrior evaluates the weekend warrior badge
+func (a *ActivitiesImpl) evaluateWeekendWarrior(queryResult *QueryResult) (bool, float64) {
+	// The result should be a duration in seconds from LongestConsecutiveTrueDuration operation
+	if queryResult.Result == nil {
+		return false, 0.0
+	}
+
+	// For weekend warrior, we need a duration >= 4 weeks of pattern
+	requiredDurationSeconds := float64(4 * 7 * 24 * 60 * 60) // 4 weeks in seconds
 
 	switch result := queryResult.Result.(type) {
 	case float64:
