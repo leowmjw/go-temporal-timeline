@@ -1,6 +1,10 @@
 run:
 	@go run *.go
 
+dev:
+	# Starts Overmind to mintor Procfile ..
+	@pkgx overmind s
+
 server:
 	@go run ./cmd/server
 

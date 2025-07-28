@@ -40,7 +40,7 @@ func main() {
 	logger := slog.New(logHandler)
 	slog.SetDefault(logger)
 
-	logger.Info("Starting Timeline Framework Service",
+	logger.Info("Starting Timeline Framework Service Duex..",
 		"http_addr", *httpAddr,
 		"temporal_addr", *temporalAddr,
 		"namespace", *namespace,

@@ -38,3 +38,6 @@ go.work.sum
 bin
 go-temporal-timeline
 /timeline
+
+# Ignore any temp files ..
+tmp/
